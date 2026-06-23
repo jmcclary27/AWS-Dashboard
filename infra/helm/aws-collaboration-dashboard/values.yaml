@@ -1,0 +1,18 @@
+image:
+  web:
+    repository: ghcr.io/example/aws-collaboration-dashboard-web
+    tag: latest
+  api:
+    repository: ghcr.io/example/aws-collaboration-dashboard-api
+    tag: latest
+
+ingress:
+  enabled: false
+  host: aws-dashboard.local
+
+postgres:
+  storageSize: 5Gi
+
+collector:
+  schedule: "0 6 * * *"
+

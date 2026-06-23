@@ -1,0 +1,13 @@
+{
+  "name": "aws-collaboration-dashboard",
+  "private": true,
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "dev:web": "pnpm --filter web dev",
+    "build:web": "pnpm --filter web build",
+    "lint:web": "pnpm --filter web lint",
+    "compose:up": "docker compose up --build",
+    "compose:down": "docker compose down"
+  }
+}
+
