@@ -1,9 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { Space_Grotesk, IBM_Plex_Sans } from "next/font/google";
 import type { ReactNode } from "react";
+
+import { useConnection } from "@/components/connection-provider";
 
 const displayFont = Space_Grotesk({ subsets: ["latin"], variable: "--font-display" });
 const bodyFont = IBM_Plex_Sans({ subsets: ["latin"], weight: ["400", "500", "600"], variable: "--font-body" });
@@ -20,6 +22,13 @@ const navItems = [
 
 export function AppFrame({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const { connections, selectedConnection, selectedConnectionId, setSelectedConnectionId, loading } = useConnection();
+  const currentSearch = searchParams.toString();
+
+  function hrefWithScope(path: string) {
+    return currentSearch ? `${path}?${currentSearch}` : path;
+  }
 
   return (
     <div className={`${displayFont.variable} ${bodyFont.variable} min-h-screen font-[family-name:var(--font-body)] text-slate-900`}>
@@ -37,13 +46,29 @@ export function AppFrame({ children }: { children: ReactNode }) {
               </p>
             </div>
 
+            <div className="mt-6">
+              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Connection Scope</p>
+              <select
+                value={selectedConnectionId ?? ""}
+                onChange={(event) => setSelectedConnectionId(Number(event.target.value))}
+                className="mt-3 w-full rounded-2xl border border-slate-200 bg-white/85 px-4 py-3 text-sm text-slate-900"
+                disabled={loading || connections.length === 0}
+              >
+                {connections.map((connection) => (
+                  <option key={connection.id} value={connection.id}>
+                    {connection.name} ({connection.kind})
+                  </option>
+                ))}
+              </select>
+            </div>
+
             <nav className="mt-8 space-y-2">
               {navItems.map((item) => {
                 const active = pathname === item.href;
                 return (
                   <Link
                     key={item.href}
-                    href={item.href}
+                    href={hrefWithScope(item.href)}
                     className={`block rounded-2xl px-4 py-3 text-sm transition ${
                       active
                         ? "bg-slate-900 text-white shadow-lg shadow-slate-900/15"
@@ -58,9 +83,13 @@ export function AppFrame({ children }: { children: ReactNode }) {
 
             <div className="mt-auto rounded-3xl bg-slate-900 p-5 text-white">
               <p className="text-xs uppercase tracking-[0.24em] text-slate-300">Current Mode</p>
-              <p className="mt-3 font-[family-name:var(--font-display)] text-xl">Demo Sync</p>
+              <p className="mt-3 font-[family-name:var(--font-display)] text-xl">
+                {selectedConnection?.name ?? "Loading..."}
+              </p>
               <p className="mt-2 text-sm text-slate-300">
-                90 days of seeded data, 14-day rolling refreshes, and future collector-ready API seams.
+                {selectedConnection
+                  ? `${selectedConnection.kind} connection with ${selectedConnection.account_count} visible account${selectedConnection.account_count === 1 ? "" : "s"}.`
+                  : "Resolving the active connection scope."}
               </p>
             </div>
           </aside>
@@ -71,9 +100,23 @@ export function AppFrame({ children }: { children: ReactNode }) {
                 <p className="text-xs uppercase tracking-[0.28em] text-slate-500">AWS Portfolio</p>
                 <p className="font-[family-name:var(--font-display)] text-xl font-semibold">Cost Console</p>
               </div>
-              <Link href="/dashboard" className="rounded-full bg-slate-900 px-4 py-2 text-sm text-white">
-                Home
-              </Link>
+              <div className="flex items-center gap-3">
+                <select
+                  value={selectedConnectionId ?? ""}
+                  onChange={(event) => setSelectedConnectionId(Number(event.target.value))}
+                  className="rounded-full border border-slate-200 bg-white/85 px-4 py-2 text-sm text-slate-900"
+                  disabled={loading || connections.length === 0}
+                >
+                  {connections.map((connection) => (
+                    <option key={connection.id} value={connection.id}>
+                      {connection.name}
+                    </option>
+                  ))}
+                </select>
+                <Link href={hrefWithScope("/dashboard")} className="rounded-full bg-slate-900 px-4 py-2 text-sm text-white">
+                  Home
+                </Link>
+              </div>
             </div>
             {children}
           </main>

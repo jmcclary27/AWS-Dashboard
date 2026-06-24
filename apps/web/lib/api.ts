@@ -23,13 +23,28 @@ export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T
   return response.json() as Promise<T>;
 }
 
-export function useApiData<T>(path: string) {
+export function withConnectionId(path: string, connectionId: number | null | undefined) {
+  if (!connectionId) {
+    return path;
+  }
+  const separator = path.includes("?") ? "&" : "?";
+  return `${path}${separator}connection_id=${connectionId}`;
+}
+
+export function useApiData<T>(path: string | null) {
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshIndex, setRefreshIndex] = useState(0);
 
   useEffect(() => {
+    if (!path) {
+      setLoading(false);
+      setError(null);
+      setData(null);
+      return;
+    }
+
     let active = true;
 
     async function load() {

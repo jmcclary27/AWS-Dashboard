@@ -3,16 +3,32 @@
 import { useState } from "react";
 
 import { BreakdownBarChart } from "@/components/charts";
+import { useConnection } from "@/components/connection-provider";
 import { ErrorState, LoadingState, MetricRow, PageHeader, Panel, uiHelpers } from "@/components/ui";
-import { useApiData } from "@/lib/api";
+import { useApiData, withConnectionId } from "@/lib/api";
 import type { AccountsResponse, ServicesResponse } from "@/lib/types";
 
 export default function ServicesPage() {
   const [range, setRange] = useState("90d");
   const [accountId, setAccountId] = useState<string>("all");
-  const accounts = useApiData<AccountsResponse>("/accounts");
-  const servicesPath = `/services?range=${range}${accountId === "all" ? "" : `&account_id=${accountId}`}`;
+  const { loading: connectionLoading, error: connectionError, selectedConnection, selectedConnectionId } = useConnection();
+  const accounts = useApiData<AccountsResponse>(selectedConnectionId ? withConnectionId("/accounts", selectedConnectionId) : null);
+  const servicesPath = selectedConnectionId
+    ? withConnectionId(`/services?range=${range}${accountId === "all" ? "" : `&account_id=${accountId}`}`, selectedConnectionId)
+    : null;
   const services = useApiData<ServicesResponse>(servicesPath);
+
+  if (connectionError) {
+    return <ErrorState message={connectionError} />;
+  }
+
+  if (connectionLoading) {
+    return <LoadingState label="Resolving the active connection..." />;
+  }
+
+  if (!selectedConnectionId) {
+    return <ErrorState message="No available connection. Initialize the demo dataset or create an AWS connection." />;
+  }
 
   if (accounts.loading || services.loading) {
     return <LoadingState label="Loading service breakdowns..." />;
@@ -27,7 +43,7 @@ export default function ServicesPage() {
       <PageHeader
         eyebrow="Service Breakdown"
         title="The expensive layers become legible fast."
-        description="This view is intentionally tuned to show where spend is concentrating by AWS service and how that changes over time for either the full portfolio or an individual account."
+        description={`Tracing service concentration inside ${selectedConnection?.name ?? "the selected connection"} so organizational and standalone views stay independent.`}
         action={
           <div className="flex flex-wrap gap-3">
             <select

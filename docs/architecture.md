@@ -7,13 +7,12 @@ The browser talks only to FastAPI. The web app never connects to Postgres direct
 ## MVP shape
 
 - `apps/web`: dashboards and forms
-- `apps/api`: API, domain logic, and seeded analytics
-- `postgres`: durable storage for accounts, costs, forecasts, recommendations, and anomalies
+- `apps/api`: API, connection-scoped collectors, and seeded analytics
+- `postgres`: durable storage for canonical accounts, connections, scoped costs, forecasts, recommendations, and anomalies
 
 ## Data flow
 
-1. The frontend fetches JSON from `FastAPI /api/v1`.
-2. FastAPI reads and writes Postgres through SQLAlchemy 2 models.
-3. A demo sync command refreshes the latest 14-day cost window and rebuilds derived findings.
-4. Later, the same sync surface will be backed by Cost Explorer collection.
-
+1. The frontend fetches JSON from `FastAPI /api/v1`, always scoped to one connection.
+2. FastAPI reads and writes Postgres through SQLAlchemy 2 models and Alembic-managed schema changes.
+3. A built-in demo connection refreshes a rolling 14-day window for local development.
+4. Org-management and standalone account-role collectors write through the same scoped tables so datasets stay isolated.

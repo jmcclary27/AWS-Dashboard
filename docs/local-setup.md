@@ -20,4 +20,8 @@ Frontend host workflows expect `pnpm`, while the API uses Python tooling.
 
 ## Demo behavior
 
-The initial boot seeds 90 days of synthetic cost data. Manual sync endpoints refresh a rolling 14-day window to simulate later AWS ingestion.
+The initial boot seeds 90 days of synthetic cost data into the built-in demo connection.
+
+- The web app now scopes every analytics request by `connection_id`.
+- The settings page is the primary UI for creating org-management and standalone account-role connections.
+- Demo sync continues to refresh a rolling 14-day window so local work stays near-zero cost even before AWS credentials are configured.

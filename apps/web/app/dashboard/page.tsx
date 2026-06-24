@@ -1,6 +1,7 @@
 "use client";
 
 import { SpendLineChart, BreakdownBarChart } from "@/components/charts";
+import { useConnection } from "@/components/connection-provider";
 import {
   AnomalyCard,
   ErrorState,
@@ -12,7 +13,7 @@ import {
   StatCard,
   uiHelpers
 } from "@/components/ui";
-import { useApiData } from "@/lib/api";
+import { useApiData, withConnectionId } from "@/lib/api";
 import type {
   AnomaliesResponse,
   ForecastResponse,
@@ -21,10 +22,23 @@ import type {
 } from "@/lib/types";
 
 export default function DashboardPage() {
-  const summary = useApiData<SummaryResponse>("/summary?range=30d");
-  const forecast = useApiData<ForecastResponse>("/forecast");
-  const anomalies = useApiData<AnomaliesResponse>("/anomalies");
-  const recommendations = useApiData<RecommendationsResponse>("/recommendations");
+  const { loading: connectionLoading, error: connectionError, selectedConnection, selectedConnectionId } = useConnection();
+  const summary = useApiData<SummaryResponse>(selectedConnectionId ? withConnectionId("/summary?range=30d", selectedConnectionId) : null);
+  const forecast = useApiData<ForecastResponse>(selectedConnectionId ? withConnectionId("/forecast", selectedConnectionId) : null);
+  const anomalies = useApiData<AnomaliesResponse>(selectedConnectionId ? withConnectionId("/anomalies", selectedConnectionId) : null);
+  const recommendations = useApiData<RecommendationsResponse>(selectedConnectionId ? withConnectionId("/recommendations", selectedConnectionId) : null);
+
+  if (connectionError) {
+    return <ErrorState message={connectionError} />;
+  }
+
+  if (connectionLoading) {
+    return <LoadingState label="Resolving the active connection..." />;
+  }
+
+  if (!selectedConnectionId) {
+    return <ErrorState message="No available connection. Initialize the demo dataset or create an AWS connection." />;
+  }
 
   if (summary.loading || forecast.loading || anomalies.loading || recommendations.loading) {
     return <LoadingState label="Loading the command center..." />;
@@ -40,9 +54,9 @@ export default function DashboardPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow="FinOps MVP"
+        eyebrow={selectedConnection?.kind === "org_management" ? "Organization Scope" : selectedConnection?.kind === "account_role" ? "Standalone Scope" : "FinOps MVP"}
         title="Local cost visibility with a real deployment runway."
-        description="This dashboard fronts only the FastAPI layer, starts with seeded data, and mirrors the routes and tables we can later feed from Cost Explorer."
+        description={`Viewing ${selectedConnection?.name ?? "the active connection"} through the FastAPI layer so org, standalone, and demo data stay isolated instead of blending together.`}
       />
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -155,4 +169,3 @@ export default function DashboardPage() {
     </div>
   );
 }
-

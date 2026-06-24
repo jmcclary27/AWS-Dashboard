@@ -1,4 +1,5 @@
 export type SummaryResponse = {
+  connection_id: number;
   range: string;
   generated_at: string;
   totals: {
@@ -35,13 +36,18 @@ export type AccountItem = {
   last_sync_at: string | null;
   last_sync_status: string;
   unallocated_share_pct: number;
+  membership_source: string;
+  is_primary: boolean;
+  membership_enabled: boolean;
 };
 
 export type AccountsResponse = {
+  connection_id: number;
   items: AccountItem[];
 };
 
 export type ServicesResponse = {
+  connection_id: number;
   range: string;
   account_id: number | null;
   summary: {
@@ -60,6 +66,7 @@ export type ServicesResponse = {
 };
 
 export type TrendsResponse = {
+  connection_id: number;
   range: string;
   group_by: "account" | "service" | "team";
   series: Array<{ date: string; group: string; cost: number }>;
@@ -68,6 +75,7 @@ export type TrendsResponse = {
 };
 
 export type ForecastResponse = {
+  connection_id: number;
   month: string;
   generated_at: string;
   overall: {
@@ -86,6 +94,7 @@ export type ForecastResponse = {
 };
 
 export type RecommendationsResponse = {
+  connection_id: number;
   items: Array<{
     id: number;
     title: string;
@@ -100,6 +109,7 @@ export type RecommendationsResponse = {
 };
 
 export type AnomaliesResponse = {
+  connection_id: number;
   items: Array<{
     id: number;
     kind: string;
@@ -116,8 +126,43 @@ export type AnomaliesResponse = {
 
 export type SyncResponse = {
   status: string;
+  connection_id: number;
   accounts_synced: number;
   records_written: number;
   window_days: number;
+  message?: string | null;
 };
 
+export type ConnectionItem = {
+  id: number;
+  name: string;
+  kind: "demo" | "org_management" | "account_role";
+  enabled: boolean;
+  role_arn: string | null;
+  external_id: string | null;
+  billing_view_arn: string | null;
+  team_tag_key: string;
+  account_count: number;
+  primary_account_name: string | null;
+  last_sync_at: string | null;
+  last_sync_status: string;
+};
+
+export type ConnectionsResponse = {
+  items: ConnectionItem[];
+};
+
+export type SyncRunsResponse = {
+  connection_id: number;
+  items: Array<{
+    id: number;
+    status: string;
+    kind: string;
+    message: string | null;
+    window_days: number;
+    accounts_synced: number;
+    records_written: number;
+    started_at: string | null;
+    finished_at: string | null;
+  }>;
+};

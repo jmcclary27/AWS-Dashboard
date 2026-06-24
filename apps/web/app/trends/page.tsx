@@ -3,15 +3,29 @@
 import { useState } from "react";
 
 import { GroupTrendChart } from "@/components/charts";
+import { useConnection } from "@/components/connection-provider";
 import { ErrorState, LoadingState, PageHeader, Panel } from "@/components/ui";
-import { useApiData } from "@/lib/api";
+import { useApiData, withConnectionId } from "@/lib/api";
 import type { TrendsResponse } from "@/lib/types";
 
 export default function TrendsPage() {
   const [range, setRange] = useState("90d");
   const [groupBy, setGroupBy] = useState<"account" | "service" | "team">("account");
-  const trendsPath = `/trends?range=${range}&group_by=${groupBy}`;
+  const { loading: connectionLoading, error: connectionError, selectedConnection, selectedConnectionId } = useConnection();
+  const trendsPath = selectedConnectionId ? withConnectionId(`/trends?range=${range}&group_by=${groupBy}`, selectedConnectionId) : null;
   const trends = useApiData<TrendsResponse>(trendsPath);
+
+  if (connectionError) {
+    return <ErrorState message={connectionError} />;
+  }
+
+  if (connectionLoading) {
+    return <LoadingState label="Resolving the active connection..." />;
+  }
+
+  if (!selectedConnectionId) {
+    return <ErrorState message="No available connection. Initialize the demo dataset or create an AWS connection." />;
+  }
 
   if (trends.loading) {
     return <LoadingState label="Loading trend data..." />;
@@ -26,7 +40,7 @@ export default function TrendsPage() {
       <PageHeader
         eyebrow="Trends"
         title="Portfolio shifts, sliced the way operators actually think."
-        description="Switch between accounts, services, and teams to understand whether the current movement is a platform-wide pattern or concentrated in one slice of the estate."
+        description={`Switch between accounts, services, and teams inside ${selectedConnection?.name ?? "the selected connection"} to understand where spend is moving without blending other datasets.`}
         action={
           <div className="flex flex-wrap gap-3">
             <select

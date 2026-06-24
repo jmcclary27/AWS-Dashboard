@@ -32,6 +32,35 @@ class Account(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
 
+class Connection(Base):
+    __tablename__ = "connections"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    kind: Mapped[str] = mapped_column(String(32), index=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    role_arn: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    external_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    billing_view_arn: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    team_tag_key: Mapped[str] = mapped_column(String(64), default="Team")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class ConnectionAccount(Base):
+    __tablename__ = "connection_accounts"
+    __table_args__ = (UniqueConstraint("connection_id", "account_id", name="uq_connection_accounts"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    connection_id: Mapped[int] = mapped_column(Integer, ForeignKey("connections.id"), index=True)
+    account_id: Mapped[int] = mapped_column(Integer, ForeignKey("accounts.id"), index=True)
+    membership_source: Mapped[str] = mapped_column(String(24), default="manual")
+    is_primary: Mapped[bool] = mapped_column(Boolean, default=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
 class Team(Base):
     __tablename__ = "teams"
 
@@ -56,10 +85,13 @@ class SyncRun(Base):
     __tablename__ = "sync_runs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    connection_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("connections.id"), nullable=True, index=True)
     account_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("accounts.id"), nullable=True, index=True)
     sync_type: Mapped[str] = mapped_column(String(32), default="demo")
     status: Mapped[str] = mapped_column(String(32), default="success")
     message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    window_days: Mapped[int] = mapped_column(Integer, default=14)
+    accounts_synced: Mapped[int] = mapped_column(Integer, default=0)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     records_written: Mapped[int] = mapped_column(Integer, default=0)
@@ -68,9 +100,10 @@ class SyncRun(Base):
 
 class DailyAccountCost(Base):
     __tablename__ = "daily_account_costs"
-    __table_args__ = (UniqueConstraint("account_id", "day", name="uq_daily_account_costs"),)
+    __table_args__ = (UniqueConstraint("connection_id", "account_id", "day", name="uq_daily_account_costs"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    connection_id: Mapped[int] = mapped_column(Integer, ForeignKey("connections.id"), index=True)
     account_id: Mapped[int] = mapped_column(Integer, ForeignKey("accounts.id"), index=True)
     day: Mapped[date] = mapped_column(Date, index=True)
     cost_usd: Mapped[float] = mapped_column(Float)
@@ -78,9 +111,10 @@ class DailyAccountCost(Base):
 
 class DailyServiceCost(Base):
     __tablename__ = "daily_service_costs"
-    __table_args__ = (UniqueConstraint("account_id", "day", "service_name", name="uq_daily_service_costs"),)
+    __table_args__ = (UniqueConstraint("connection_id", "account_id", "day", "service_name", name="uq_daily_service_costs"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    connection_id: Mapped[int] = mapped_column(Integer, ForeignKey("connections.id"), index=True)
     account_id: Mapped[int] = mapped_column(Integer, ForeignKey("accounts.id"), index=True)
     day: Mapped[date] = mapped_column(Date, index=True)
     service_name: Mapped[str] = mapped_column(String(96), index=True)
@@ -89,9 +123,10 @@ class DailyServiceCost(Base):
 
 class DailyTeamCost(Base):
     __tablename__ = "daily_team_costs"
-    __table_args__ = (UniqueConstraint("account_id", "day", "team_id", name="uq_daily_team_costs"),)
+    __table_args__ = (UniqueConstraint("connection_id", "account_id", "day", "team_id", name="uq_daily_team_costs"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    connection_id: Mapped[int] = mapped_column(Integer, ForeignKey("connections.id"), index=True)
     account_id: Mapped[int] = mapped_column(Integer, ForeignKey("accounts.id"), index=True)
     team_id: Mapped[int] = mapped_column(Integer, ForeignKey("teams.id"), index=True)
     day: Mapped[date] = mapped_column(Date, index=True)
@@ -102,6 +137,7 @@ class Forecast(Base):
     __tablename__ = "forecasts"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    connection_id: Mapped[int] = mapped_column(Integer, ForeignKey("connections.id"), index=True)
     account_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("accounts.id"), nullable=True, index=True)
     day: Mapped[date] = mapped_column(Date, index=True)
     projected_cost_usd: Mapped[float] = mapped_column(Float)
@@ -113,6 +149,7 @@ class Anomaly(Base):
     __tablename__ = "anomalies"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    connection_id: Mapped[int] = mapped_column(Integer, ForeignKey("connections.id"), index=True)
     kind: Mapped[str] = mapped_column(String(48), index=True)
     title: Mapped[str] = mapped_column(String(160))
     summary: Mapped[str] = mapped_column(Text)
@@ -130,6 +167,7 @@ class Recommendation(Base):
     __tablename__ = "recommendations"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    connection_id: Mapped[int] = mapped_column(Integer, ForeignKey("connections.id"), index=True)
     title: Mapped[str] = mapped_column(String(160))
     summary: Mapped[str] = mapped_column(Text)
     impact_level: Mapped[str] = mapped_column(String(24), default="medium")

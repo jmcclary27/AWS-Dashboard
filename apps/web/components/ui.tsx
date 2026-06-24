@@ -199,7 +199,8 @@ export function AnomalyCard({
 
 export function AccountTableRow({
   account,
-  onSync
+  onSync,
+  showSyncAction = true
 }: {
   account: {
     id: number;
@@ -211,14 +212,21 @@ export function AccountTableRow({
     unallocated_share_pct: number;
     last_sync_at: string | null;
     last_sync_status: string;
+    membership_source: string;
+    is_primary: boolean;
   };
   onSync: (accountId: number) => void;
+  showSyncAction?: boolean;
 }) {
   return (
     <tr className="border-b border-slate-200/70 text-sm last:border-none">
       <td className="py-4 pr-4">
         <p className="font-semibold text-slate-900">{account.display_name}</p>
         <p className="text-slate-500">{account.aws_account_id}</p>
+        <div className="mt-2 flex flex-wrap gap-2">
+          <StatusPill label={account.membership_source} />
+          {account.is_primary ? <StatusPill label="primary" /> : null}
+        </div>
       </td>
       <td className="py-4 pr-4">{formatCurrency(account.current_30d_cost)}</td>
       <td className="py-4 pr-4">{formatCurrency(account.forecast_total)}</td>
@@ -227,12 +235,16 @@ export function AccountTableRow({
         <SmallMeta updatedAt={account.last_sync_at} status={account.last_sync_status} />
       </td>
       <td className="py-4 text-right">
-        <button
-          onClick={() => onSync(account.id)}
-          className="rounded-full bg-slate-900 px-4 py-2 text-sm text-white transition hover:bg-slate-700"
-        >
-          Sync
-        </button>
+        {showSyncAction ? (
+          <button
+            onClick={() => onSync(account.id)}
+            className="rounded-full bg-slate-900 px-4 py-2 text-sm text-white transition hover:bg-slate-700"
+          >
+            Sync
+          </button>
+        ) : (
+          <span className="text-xs uppercase tracking-[0.18em] text-slate-500">connection sync</span>
+        )}
       </td>
     </tr>
   );

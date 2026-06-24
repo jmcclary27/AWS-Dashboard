@@ -10,6 +10,8 @@ from app.db.models import (
     Account,
     Anomaly,
     AppSetting,
+    Connection,
+    ConnectionAccount,
     DailyAccountCost,
     DailyServiceCost,
     DailyTeamCost,
@@ -19,6 +21,10 @@ from app.db.models import (
     Team,
     TeamAlias,
 )
+
+DEMO_CONNECTION_NAME = "Local Demo"
+DEMO_CONNECTION_KIND = "demo"
+DEFAULT_TEAM_TAG_KEY = "Team"
 
 DEFAULT_SERVICE_WEIGHTS = {
     "Amazon EC2": 0.22,
@@ -129,6 +135,19 @@ def iter_days(start_day: date, end_day: date):
         cursor += timedelta(days=1)
 
 
+def normalize_team_alias(value: str | None) -> str:
+    if not value:
+        return ""
+    if "$" in value:
+        value = value.split("$", 1)[1]
+    return value.strip().lower()
+
+
+def display_team_name(value: str) -> str:
+    cleaned = value.strip().replace("_", " ").replace("-", " ")
+    return " ".join(part.capitalize() for part in cleaned.split()) or "Unallocated"
+
+
 def allocate_amounts(total: float, weights: dict[str, float], rng: random.Random, jitter: float = 0.12) -> dict[str, float]:
     adjusted = {}
     for name, weight in weights.items():
@@ -193,7 +212,59 @@ def build_profile(account: Account) -> dict:
     }
 
 
-def ensure_reference_data(session: Session) -> tuple[list[Account], dict[str, int]]:
+def ensure_demo_connection(session: Session) -> Connection:
+    connection = session.execute(
+        select(Connection).where(Connection.kind == DEMO_CONNECTION_KIND).order_by(Connection.id)
+    ).scalar_one_or_none()
+    if connection:
+        return connection
+
+    connection = Connection(
+        name=DEMO_CONNECTION_NAME,
+        kind=DEMO_CONNECTION_KIND,
+        enabled=True,
+        team_tag_key=DEFAULT_TEAM_TAG_KEY,
+    )
+    session.add(connection)
+    session.flush()
+    return connection
+
+
+def ensure_connection_membership(
+    session: Session,
+    connection_id: int,
+    account_id: int,
+    membership_source: str = "manual",
+    is_primary: bool = False,
+    enabled: bool = True,
+) -> ConnectionAccount:
+    membership = session.execute(
+        select(ConnectionAccount).where(
+            ConnectionAccount.connection_id == connection_id,
+            ConnectionAccount.account_id == account_id,
+        )
+    ).scalar_one_or_none()
+    if membership:
+        membership.membership_source = membership_source
+        membership.is_primary = is_primary
+        membership.enabled = enabled
+        session.add(membership)
+        session.flush()
+        return membership
+
+    membership = ConnectionAccount(
+        connection_id=connection_id,
+        account_id=account_id,
+        membership_source=membership_source,
+        is_primary=is_primary,
+        enabled=enabled,
+    )
+    session.add(membership)
+    session.flush()
+    return membership
+
+
+def ensure_reference_data(session: Session) -> tuple[Connection, list[Account], dict[str, int]]:
     existing_teams = {team.name: team for team in session.scalars(select(Team)).all()}
     for team_config in DEFAULT_TEAMS:
         team = existing_teams.get(team_config["name"])
@@ -207,9 +278,7 @@ def ensure_reference_data(session: Session) -> tuple[list[Account], dict[str, in
             session.flush()
             existing_teams[team.name] = team
 
-        known_aliases = set(
-            session.scalars(select(TeamAlias.alias).where(TeamAlias.team_id == team.id)).all()
-        )
+        known_aliases = set(session.scalars(select(TeamAlias.alias).where(TeamAlias.team_id == team.id)).all())
         for alias in team_config["aliases"]:
             if alias not in known_aliases:
                 session.add(TeamAlias(team_id=team.id, alias=alias))
@@ -220,56 +289,165 @@ def ensure_reference_data(session: Session) -> tuple[list[Account], dict[str, in
             account = Account(
                 display_name=profile["display_name"],
                 aws_account_id=profile["aws_account_id"],
-                team_tag_key="Team",
+                team_tag_key=DEFAULT_TEAM_TAG_KEY,
                 enabled=True,
             )
             session.add(account)
+            session.flush()
             existing_accounts[profile["aws_account_id"]] = account
 
     if not session.get(AppSetting, "default_team_tag_key"):
         session.add(
             AppSetting(
                 key="default_team_tag_key",
-                value="Team",
+                value=DEFAULT_TEAM_TAG_KEY,
                 description="Default AWS cost allocation tag key",
             )
         )
 
-    session.flush()
+    demo_connection = ensure_demo_connection(session)
     accounts = session.scalars(select(Account).order_by(Account.display_name)).all()
+    for account in accounts:
+        ensure_connection_membership(
+            session,
+            connection_id=demo_connection.id,
+            account_id=account.id,
+            membership_source="manual",
+            is_primary=False,
+            enabled=account.enabled,
+        )
+
     team_ids = {team.name: team.id for team in session.scalars(select(Team)).all()}
-    return accounts, team_ids
+    session.flush()
+    return demo_connection, accounts, team_ids
 
 
-def reset_demo_dataset(session: Session, days: int = 90) -> None:
-    accounts, team_ids = ensure_reference_data(session)
+def get_demo_connection(session: Session) -> Connection:
+    demo_connection, _, _ = ensure_reference_data(session)
+    return demo_connection
 
+
+def get_connection_account_ids(session: Session, connection_id: int, enabled_only: bool = True) -> list[int]:
+    query = select(ConnectionAccount.account_id).where(ConnectionAccount.connection_id == connection_id)
+    if enabled_only:
+        query = query.where(ConnectionAccount.enabled.is_(True))
+    return list(session.scalars(query).all())
+
+
+def get_connection_accounts(session: Session, connection_id: int, enabled_only: bool = True) -> list[Account]:
+    query = (
+        select(Account)
+        .join(ConnectionAccount, ConnectionAccount.account_id == Account.id)
+        .where(ConnectionAccount.connection_id == connection_id)
+        .order_by(Account.display_name)
+    )
+    if enabled_only:
+        query = query.where(ConnectionAccount.enabled.is_(True))
+    return list(session.scalars(query).all())
+
+
+def get_unallocated_team_id(session: Session) -> int:
+    ensure_reference_data(session)
+    return int(session.scalar(select(Team.id).where(Team.name == "Unallocated")))
+
+
+def resolve_team_id_for_tag_value(session: Session, raw_value: str | None) -> int:
+    normalized = normalize_team_alias(raw_value)
+    if not normalized:
+        return get_unallocated_team_id(session)
+
+    alias = session.execute(
+        select(TeamAlias).where(TeamAlias.alias == normalized)
+    ).scalar_one_or_none()
+    if alias:
+        return alias.team_id
+
+    team = Team(name=display_team_name(normalized), slug=slugify(display_team_name(normalized)), is_protected=False)
+    session.add(team)
+    session.flush()
+    session.add(TeamAlias(team_id=team.id, alias=normalized))
+    session.flush()
+    return team.id
+
+
+def clear_connection_window_data(
+    session: Session,
+    connection_id: int,
+    account_ids: list[int],
+    start_day: date,
+    end_day: date,
+) -> None:
+    if not account_ids:
+        return
+
+    session.execute(
+        delete(DailyAccountCost).where(
+            DailyAccountCost.connection_id == connection_id,
+            DailyAccountCost.account_id.in_(account_ids),
+            DailyAccountCost.day >= start_day,
+            DailyAccountCost.day <= end_day,
+        )
+    )
+    session.execute(
+        delete(DailyServiceCost).where(
+            DailyServiceCost.connection_id == connection_id,
+            DailyServiceCost.account_id.in_(account_ids),
+            DailyServiceCost.day >= start_day,
+            DailyServiceCost.day <= end_day,
+        )
+    )
+    session.execute(
+        delete(DailyTeamCost).where(
+            DailyTeamCost.connection_id == connection_id,
+            DailyTeamCost.account_id.in_(account_ids),
+            DailyTeamCost.day >= start_day,
+            DailyTeamCost.day <= end_day,
+        )
+    )
+
+
+def reset_demo_dataset(session: Session, days: int = 90, connection_id: int | None = None) -> None:
+    demo_connection, _, team_ids = ensure_reference_data(session)
+    connection = demo_connection if connection_id is None else session.get(Connection, connection_id)
+    if not connection or connection.kind != DEMO_CONNECTION_KIND:
+        raise ValueError("Demo dataset can only be reset for the built-in demo connection")
+
+    accounts = get_connection_accounts(session, connection.id)
     for model in (Forecast, Anomaly, Recommendation, SyncRun, DailyServiceCost, DailyTeamCost, DailyAccountCost):
-        session.execute(delete(model))
+        session.execute(delete(model).where(model.connection_id == connection.id))
 
     end_day = utc_today()
     start_day = end_day - timedelta(days=max(days - 1, 0))
-    records_written = generate_daily_costs(session, accounts, team_ids, start_day, end_day, variant_seed=0)
-    rebuild_derived_tables(session, end_day)
-
-    for account in accounts:
-        session.add(
-            SyncRun(
-                account_id=account.id,
-                sync_type="seed",
-                status="success",
-                message="Initial fake dataset seeded",
-                started_at=datetime.now(timezone.utc),
-                finished_at=datetime.now(timezone.utc),
-                records_written=records_written,
-            )
+    records_written = generate_daily_costs(session, connection.id, accounts, team_ids, start_day, end_day, variant_seed=0)
+    rebuild_connection_derived_tables(session, connection.id, end_day)
+    session.add(
+        SyncRun(
+            connection_id=connection.id,
+            sync_type=connection.kind,
+            status="success",
+            message="Initial fake dataset seeded",
+            started_at=datetime.now(timezone.utc),
+            finished_at=datetime.now(timezone.utc),
+            records_written=records_written,
+            window_days=days,
+            accounts_synced=len(accounts),
         )
-
+    )
     session.commit()
 
 
-def refresh_recent_demo_data(session: Session, account_ids: list[int] | None = None, days: int = 14) -> dict[str, int]:
-    accounts = session.scalars(select(Account).order_by(Account.display_name)).all()
+def refresh_recent_demo_data(
+    session: Session,
+    account_ids: list[int] | None = None,
+    days: int = 14,
+    connection_id: int | None = None,
+) -> dict[str, int]:
+    demo_connection = get_demo_connection(session)
+    connection = demo_connection if connection_id is None else session.get(Connection, connection_id)
+    if not connection or connection.kind != DEMO_CONNECTION_KIND:
+        raise ValueError("Demo sync is only available for the built-in demo connection")
+
+    accounts = get_connection_accounts(session, connection.id)
     if account_ids:
         target_accounts = [account for account in accounts if account.id in account_ids]
     else:
@@ -278,57 +456,37 @@ def refresh_recent_demo_data(session: Session, account_ids: list[int] | None = N
     if not target_accounts:
         return {"accounts_synced": 0, "records_written": 0}
 
-    _, team_ids = ensure_reference_data(session)
+    _, _, team_ids = ensure_reference_data(session)
     end_day = utc_today()
     start_day = end_day - timedelta(days=max(days - 1, 0))
 
-    account_id_set = [account.id for account in target_accounts]
-    session.execute(
-        delete(DailyAccountCost).where(
-            DailyAccountCost.account_id.in_(account_id_set),
-            DailyAccountCost.day >= start_day,
-            DailyAccountCost.day <= end_day,
-        )
-    )
-    session.execute(
-        delete(DailyServiceCost).where(
-            DailyServiceCost.account_id.in_(account_id_set),
-            DailyServiceCost.day >= start_day,
-            DailyServiceCost.day <= end_day,
-        )
-    )
-    session.execute(
-        delete(DailyTeamCost).where(
-            DailyTeamCost.account_id.in_(account_id_set),
-            DailyTeamCost.day >= start_day,
-            DailyTeamCost.day <= end_day,
-        )
-    )
-
-    variant_seed = len(session.scalars(select(SyncRun.id)).all()) + days
+    clear_connection_window_data(session, connection.id, [account.id for account in target_accounts], start_day, end_day)
+    variant_seed = len(session.scalars(select(SyncRun.id).where(SyncRun.connection_id == connection.id)).all()) + days
     records_written = generate_daily_costs(
         session,
+        connection.id,
         target_accounts,
         team_ids,
         start_day,
         end_day,
         variant_seed=variant_seed,
     )
-    rebuild_derived_tables(session, end_day)
+    rebuild_connection_derived_tables(session, connection.id, end_day)
 
     timestamp = datetime.now(timezone.utc)
-    for account in target_accounts:
-        session.add(
-            SyncRun(
-                account_id=account.id,
-                sync_type="manual-demo",
-                status="success",
-                message=f"Refreshed {days} days of demo data",
-                started_at=timestamp,
-                finished_at=timestamp,
-                records_written=records_written,
-            )
+    session.add(
+        SyncRun(
+            connection_id=connection.id,
+            sync_type=connection.kind,
+            status="success",
+            message=f"Refreshed {days} days of demo data",
+            started_at=timestamp,
+            finished_at=timestamp,
+            records_written=records_written,
+            window_days=days,
+            accounts_synced=len(target_accounts),
         )
+    )
 
     session.commit()
     return {"accounts_synced": len(target_accounts), "records_written": records_written}
@@ -336,6 +494,7 @@ def refresh_recent_demo_data(session: Session, account_ids: list[int] | None = N
 
 def generate_daily_costs(
     session: Session,
+    connection_id: int,
     accounts: list[Account],
     team_ids: dict[str, int],
     start_day: date,
@@ -365,12 +524,13 @@ def generate_daily_costs(
             service_allocations = allocate_amounts(total_cost, service_weights, rng, jitter=0.18)
             account_total = round(sum(service_allocations.values()), 2)
 
-            session.add(DailyAccountCost(account_id=account.id, day=current_day, cost_usd=account_total))
+            session.add(DailyAccountCost(connection_id=connection_id, account_id=account.id, day=current_day, cost_usd=account_total))
             records_written += 1
 
             for service_name, amount in service_allocations.items():
                 session.add(
                     DailyServiceCost(
+                        connection_id=connection_id,
                         account_id=account.id,
                         day=current_day,
                         service_name=service_name,
@@ -383,6 +543,7 @@ def generate_daily_costs(
             for team_name, amount in team_allocations.items():
                 session.add(
                     DailyTeamCost(
+                        connection_id=connection_id,
                         account_id=account.id,
                         team_id=team_ids[team_name],
                         day=current_day,
@@ -395,29 +556,30 @@ def generate_daily_costs(
     return records_written
 
 
-def rebuild_derived_tables(session: Session, as_of: date | None = None) -> None:
+def rebuild_connection_derived_tables(session: Session, connection_id: int, as_of: date | None = None) -> None:
     as_of = as_of or utc_today()
-    rebuild_forecasts(session, as_of)
-    rebuild_anomalies(session, as_of)
-    rebuild_recommendations(session, as_of)
+    rebuild_local_forecasts(session, connection_id, as_of, model_version="demo-local-v1")
+    rebuild_connection_anomalies(session, connection_id, as_of)
+    rebuild_connection_recommendations(session, connection_id, as_of)
     session.flush()
 
 
-def rebuild_forecasts(session: Session, as_of: date) -> None:
-    session.execute(delete(Forecast))
+def rebuild_local_forecasts(session: Session, connection_id: int, as_of: date, model_version: str = "local-fallback-v1") -> None:
+    session.execute(delete(Forecast).where(Forecast.connection_id == connection_id))
     month_start = as_of.replace(day=1)
     next_month = (month_start.replace(day=28) + timedelta(days=4)).replace(day=1)
     month_end = next_month - timedelta(days=1)
 
     future_days = list(iter_days(as_of + timedelta(days=1), month_end)) if as_of < month_end else []
     overall_totals = defaultdict(float)
-    accounts = session.scalars(select(Account).where(Account.enabled.is_(True)).order_by(Account.display_name)).all()
+    accounts = get_connection_accounts(session, connection_id)
 
     for account in accounts:
         trailing_start = max(month_start, as_of - timedelta(days=13))
         trailing_mean = (
             session.scalar(
                 select(func.avg(DailyAccountCost.cost_usd)).where(
+                    DailyAccountCost.connection_id == connection_id,
                     DailyAccountCost.account_id == account.id,
                     DailyAccountCost.day >= trailing_start,
                     DailyAccountCost.day <= as_of,
@@ -433,20 +595,29 @@ def rebuild_forecasts(session: Session, as_of: date) -> None:
             projection = round(float(trailing_mean) * (1 + 0.002 * index), 2)
             session.add(
                 Forecast(
+                    connection_id=connection_id,
                     account_id=account.id,
                     day=future_day,
                     projected_cost_usd=projection,
-                    model_version="demo-v1",
+                    model_version=model_version,
                 )
             )
             overall_totals[future_day] += projection
 
     for future_day, amount in overall_totals.items():
-        session.add(Forecast(account_id=None, day=future_day, projected_cost_usd=round(amount, 2), model_version="demo-v1"))
+        session.add(
+            Forecast(
+                connection_id=connection_id,
+                account_id=None,
+                day=future_day,
+                projected_cost_usd=round(amount, 2),
+                model_version=model_version,
+            )
+        )
 
 
-def rebuild_anomalies(session: Session, as_of: date) -> None:
-    session.execute(delete(Anomaly))
+def rebuild_connection_anomalies(session: Session, connection_id: int, as_of: date) -> None:
+    session.execute(delete(Anomaly).where(Anomaly.connection_id == connection_id))
 
     service_rows = session.execute(
         select(
@@ -457,7 +628,11 @@ def rebuild_anomalies(session: Session, as_of: date) -> None:
             DailyServiceCost.cost_usd,
         )
         .join(Account, Account.id == DailyServiceCost.account_id)
-        .where(DailyServiceCost.day >= as_of - timedelta(days=14), DailyServiceCost.day <= as_of)
+        .where(
+            DailyServiceCost.connection_id == connection_id,
+            DailyServiceCost.day >= as_of - timedelta(days=14),
+            DailyServiceCost.day <= as_of,
+        )
         .order_by(DailyServiceCost.account_id, DailyServiceCost.service_name, DailyServiceCost.day)
     ).all()
 
@@ -475,6 +650,7 @@ def rebuild_anomalies(session: Session, as_of: date) -> None:
         if trailing_average > 0 and current_cost > trailing_average * 1.3 and delta >= 25:
             session.add(
                 Anomaly(
+                    connection_id=connection_id,
                     kind="daily_spike",
                     title=f"{service_name} spiked in {display_name}",
                     summary=f"Current daily cost is {current_cost:.2f} USD versus a trailing 7-day average of {trailing_average:.2f} USD.",
@@ -490,7 +666,11 @@ def rebuild_anomalies(session: Session, as_of: date) -> None:
     team_rows = session.execute(
         select(Team.name, DailyTeamCost.day, func.sum(DailyTeamCost.cost_usd))
         .join(Team, Team.id == DailyTeamCost.team_id)
-        .where(DailyTeamCost.day >= as_of - timedelta(days=27), DailyTeamCost.day <= as_of)
+        .where(
+            DailyTeamCost.connection_id == connection_id,
+            DailyTeamCost.day >= as_of - timedelta(days=27),
+            DailyTeamCost.day <= as_of,
+        )
         .group_by(Team.name, DailyTeamCost.day)
     ).all()
 
@@ -508,6 +688,7 @@ def rebuild_anomalies(session: Session, as_of: date) -> None:
         if prior > 0 and trailing > prior * 1.2:
             session.add(
                 Anomaly(
+                    connection_id=connection_id,
                     kind="team_growth",
                     title=f"{team_name} spend is trending up",
                     summary=f"Trailing 14-day average is {trailing:.2f} USD against a prior 14-day average of {prior:.2f} USD.",
@@ -520,11 +701,12 @@ def rebuild_anomalies(session: Session, as_of: date) -> None:
             )
 
     unallocated_team_id = team_lookup["Unallocated"]
-    account_rows = session.scalars(select(Account).order_by(Account.display_name)).all()
+    account_rows = get_connection_accounts(session, connection_id)
     for account in account_rows:
         total = (
             session.scalar(
                 select(func.sum(DailyAccountCost.cost_usd)).where(
+                    DailyAccountCost.connection_id == connection_id,
                     DailyAccountCost.account_id == account.id,
                     DailyAccountCost.day >= as_of - timedelta(days=13),
                     DailyAccountCost.day <= as_of,
@@ -535,6 +717,7 @@ def rebuild_anomalies(session: Session, as_of: date) -> None:
         unallocated = (
             session.scalar(
                 select(func.sum(DailyTeamCost.cost_usd)).where(
+                    DailyTeamCost.connection_id == connection_id,
                     DailyTeamCost.account_id == account.id,
                     DailyTeamCost.team_id == unallocated_team_id,
                     DailyTeamCost.day >= as_of - timedelta(days=13),
@@ -546,6 +729,7 @@ def rebuild_anomalies(session: Session, as_of: date) -> None:
         if total and (float(unallocated) / float(total)) >= 0.12:
             session.add(
                 Anomaly(
+                    connection_id=connection_id,
                     kind="unallocated_warning",
                     title=f"{account.display_name} has elevated unallocated spend",
                     summary=f"Unallocated spend accounts for {(float(unallocated) / float(total)) * 100:.1f}% of the last 14 days.",
@@ -571,8 +755,8 @@ def recommendation_copy(service_name: str) -> tuple[str, str]:
     return ("Inspect steady service spend", "Validate whether baseline usage and attached resources still match demand.")
 
 
-def rebuild_recommendations(session: Session, as_of: date) -> None:
-    session.execute(delete(Recommendation))
+def rebuild_connection_recommendations(session: Session, connection_id: int, as_of: date) -> None:
+    session.execute(delete(Recommendation).where(Recommendation.connection_id == connection_id))
 
     last_30_start = as_of - timedelta(days=29)
     service_rows = session.execute(
@@ -584,7 +768,11 @@ def rebuild_recommendations(session: Session, as_of: date) -> None:
             func.avg(DailyServiceCost.cost_usd).label("avg_cost"),
         )
         .join(Account, Account.id == DailyServiceCost.account_id)
-        .where(DailyServiceCost.day >= last_30_start, DailyServiceCost.day <= as_of)
+        .where(
+            DailyServiceCost.connection_id == connection_id,
+            DailyServiceCost.day >= last_30_start,
+            DailyServiceCost.day <= as_of,
+        )
         .group_by(DailyServiceCost.account_id, Account.display_name, DailyServiceCost.service_name)
         .order_by(func.sum(DailyServiceCost.cost_usd).desc())
     ).all()
@@ -599,6 +787,7 @@ def rebuild_recommendations(session: Session, as_of: date) -> None:
         title, summary = recommendation_copy(service_name)
         session.add(
             Recommendation(
+                connection_id=connection_id,
                 title=f"{title} for {display_name}",
                 summary=f"{summary} Current 30-day spend for {service_name} is {monthly_cost:.2f} USD.",
                 impact_level="high" if monthly_cost >= 500 else "medium",
@@ -612,11 +801,12 @@ def rebuild_recommendations(session: Session, as_of: date) -> None:
 
     team_lookup = {team.name: team.id for team in session.scalars(select(Team)).all()}
     unallocated_team_id = team_lookup["Unallocated"]
-    accounts = session.scalars(select(Account).order_by(Account.display_name)).all()
+    accounts = get_connection_accounts(session, connection_id)
     for account in accounts:
         total = (
             session.scalar(
                 select(func.sum(DailyAccountCost.cost_usd)).where(
+                    DailyAccountCost.connection_id == connection_id,
                     DailyAccountCost.account_id == account.id,
                     DailyAccountCost.day >= last_30_start,
                     DailyAccountCost.day <= as_of,
@@ -627,6 +817,7 @@ def rebuild_recommendations(session: Session, as_of: date) -> None:
         unallocated = (
             session.scalar(
                 select(func.sum(DailyTeamCost.cost_usd)).where(
+                    DailyTeamCost.connection_id == connection_id,
                     DailyTeamCost.account_id == account.id,
                     DailyTeamCost.team_id == unallocated_team_id,
                     DailyTeamCost.day >= last_30_start,
@@ -638,6 +829,7 @@ def rebuild_recommendations(session: Session, as_of: date) -> None:
         if total and float(unallocated) / float(total) >= 0.10:
             session.add(
                 Recommendation(
+                    connection_id=connection_id,
                     title=f"Reduce unallocated tagging in {account.display_name}",
                     summary="Activate or normalize the configured team cost allocation tag so spend stops rolling into Unallocated.",
                     impact_level="medium",
@@ -647,4 +839,3 @@ def rebuild_recommendations(session: Session, as_of: date) -> None:
                     status="open",
                 )
             )
-
