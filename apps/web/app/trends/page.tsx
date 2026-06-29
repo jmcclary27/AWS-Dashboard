@@ -35,12 +35,14 @@ export default function TrendsPage() {
     return <ErrorState message={trends.error ?? "Unable to load trends."} />;
   }
 
+  const trendData = trends.data;
+
   return (
     <div className="space-y-6">
       <PageHeader
         eyebrow="Trends"
         title="Portfolio shifts, sliced the way operators actually think."
-        description={`Switch between accounts, services, and teams inside ${selectedConnection?.name ?? "the selected connection"} to understand where spend is moving without blending other datasets.`}
+        description={`Switch between accounts, services, and teams inside ${selectedConnection?.name ?? "the selected connection"} to understand where usage cost is moving without blending other datasets or conflating it with payable bill truth.`}
         action={
           <div className="flex flex-wrap gap-3">
             <select
@@ -65,13 +67,13 @@ export default function TrendsPage() {
         }
       />
 
-      <Panel title="Multi-series trendline" subtitle={`Top ${trends.data.available_groups.slice(0, 6).length} ${groupBy} groups in the selected range`}>
-        <GroupTrendChart series={trends.data.series.filter((item) => trends.data.available_groups.slice(0, 6).includes(item.group))} />
+      <Panel title="Multi-series trendline" subtitle={`Top ${trendData.available_groups.slice(0, 6).length} ${groupBy} groups in the selected range`}>
+        <GroupTrendChart series={trendData.series.filter((item) => trendData.available_groups.slice(0, 6).includes(item.group))} />
       </Panel>
 
-      <Panel title="Current leaders" subtitle="Cumulative spend across the selected grouping">
+      <Panel title="Current leaders" subtitle="Cumulative usage cost across the selected grouping">
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {trends.data.totals.slice(0, 9).map((item) => (
+          {trendData.totals.slice(0, 9).map((item) => (
             <div key={item.group} className="rounded-[24px] border border-slate-200/70 bg-white/75 p-5">
               <p className="text-sm uppercase tracking-[0.18em] text-slate-500">{groupBy}</p>
               <p className="mt-2 font-semibold text-slate-900">{item.group}</p>

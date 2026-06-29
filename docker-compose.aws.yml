@@ -1,0 +1,7 @@
+services:
+  api:
+    volumes:
+      - type: bind
+        source: ${AWS_CONFIG_DIR:?Set AWS_CONFIG_DIR in .env before using docker-compose.aws.yml}
+        target: /root/.aws
+        read_only: true

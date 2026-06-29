@@ -21,6 +21,7 @@ from app.db.models import (
     Team,
     TeamAlias,
 )
+from app.services.billing import build_demo_billing_truth
 
 DEMO_CONNECTION_NAME = "Local Demo"
 DEMO_CONNECTION_KIND = "demo"
@@ -419,6 +420,8 @@ def reset_demo_dataset(session: Session, days: int = 90, connection_id: int | No
     end_day = utc_today()
     start_day = end_day - timedelta(days=max(days - 1, 0))
     records_written = generate_daily_costs(session, connection.id, accounts, team_ids, start_day, end_day, variant_seed=0)
+    billing_result = build_demo_billing_truth(session, connection, end_day)
+    records_written += billing_result.records_written
     rebuild_connection_derived_tables(session, connection.id, end_day)
     session.add(
         SyncRun(
@@ -471,6 +474,8 @@ def refresh_recent_demo_data(
         end_day,
         variant_seed=variant_seed,
     )
+    billing_result = build_demo_billing_truth(session, connection, end_day)
+    records_written += billing_result.records_written
     rebuild_connection_derived_tables(session, connection.id, end_day)
 
     timestamp = datetime.now(timezone.utc)

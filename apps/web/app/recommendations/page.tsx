@@ -34,9 +34,9 @@ export default function RecommendationsPage() {
       <PageHeader
         eyebrow="Recommendations"
         title="A working backlog, not just an analytics flourish."
-        description={`Persisted opportunities for ${selectedConnection?.name ?? "the selected connection"}, kept separate so organizational and individual recommendations do not overlap.`}
+        description={`Persisted usage-optimization opportunities for ${selectedConnection?.name ?? "the selected connection"}, kept separate so operational recommendations do not overlap with payable bill-truth reporting.`}
       />
-      <Panel title="Open opportunities" subtitle="Initial seeded recommendations built from the same domain objects a real collector will feed">
+      <Panel title="Open opportunities" subtitle="Usage-layer recommendations built from the same scoped domain objects a real collector will feed">
         <div className="grid gap-4 md:grid-cols-2">
           {recommendations.data.items.map((item) => (
             <RecommendationCard

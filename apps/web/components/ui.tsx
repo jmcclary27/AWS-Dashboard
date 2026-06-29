@@ -208,12 +208,15 @@ export function AccountTableRow({
     aws_account_id: string;
     enabled: boolean;
     current_30d_cost: number;
-    forecast_total: number;
+    gross_usage_mtd_usd: number;
+    direct_net_due_mtd_usd: number;
+    direct_projected_month_end_net_due_usd: number;
     unallocated_share_pct: number;
     last_sync_at: string | null;
     last_sync_status: string;
     membership_source: string;
     is_primary: boolean;
+    shared_adjustments_included: boolean;
   };
   onSync: (accountId: number) => void;
   showSyncAction?: boolean;
@@ -226,10 +229,13 @@ export function AccountTableRow({
         <div className="mt-2 flex flex-wrap gap-2">
           <StatusPill label={account.membership_source} />
           {account.is_primary ? <StatusPill label="primary" /> : null}
+          {!account.shared_adjustments_included ? <StatusPill label="direct only" /> : null}
         </div>
       </td>
       <td className="py-4 pr-4">{formatCurrency(account.current_30d_cost)}</td>
-      <td className="py-4 pr-4">{formatCurrency(account.forecast_total)}</td>
+      <td className="py-4 pr-4">{formatCurrency(account.gross_usage_mtd_usd)}</td>
+      <td className="py-4 pr-4">{formatCurrency(account.direct_net_due_mtd_usd)}</td>
+      <td className="py-4 pr-4">{formatCurrency(account.direct_projected_month_end_net_due_usd)}</td>
       <td className="py-4 pr-4">{formatPercent(account.unallocated_share_pct)}</td>
       <td className="py-4 pr-4">
         <SmallMeta updatedAt={account.last_sync_at} status={account.last_sync_status} />

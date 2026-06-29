@@ -7,15 +7,24 @@ from sqlalchemy.orm import Session
 from app.db.models import (
     Account,
     Anomaly,
+    BillingForecast,
     Connection,
     ConnectionAccount,
     DailyAccountCost,
+    DailyBillingTotal,
     DailyServiceCost,
     DailyTeamCost,
     Forecast,
     Recommendation,
     SyncRun,
     Team,
+)
+from app.services.billing import (
+    BILLING_MODE_PAYABLE_HYBRID,
+    SOURCE_KIND_DATA_EXPORT,
+    TRUTH_MODE_APPROXIMATE,
+    TRUTH_MODE_EXACT,
+    billing_export_configured,
 )
 
 RANGE_TO_DAYS = {"30d": 30, "90d": 90, "365d": 365}
@@ -27,6 +36,37 @@ def utc_today() -> date:
 
 def money(value: float | None) -> float:
     return round(float(value or 0.0), 2)
+
+
+def current_month_start(today: date | None = None) -> date:
+    today = today or utc_today()
+    return today.replace(day=1)
+
+
+def day_span(start_day: date, end_day: date) -> list[date]:
+    days: list[date] = []
+    current_day = start_day
+    while current_day <= end_day:
+        days.append(current_day)
+        current_day += timedelta(days=1)
+    return days
+
+
+def billing_truth_mode_for_connection(session: Session, connection: Connection) -> str:
+    if connection.kind == "demo":
+        return TRUTH_MODE_EXACT
+    if connection.billing_mode != BILLING_MODE_PAYABLE_HYBRID:
+        return TRUTH_MODE_APPROXIMATE
+    if not billing_export_configured(connection):
+        return TRUTH_MODE_APPROXIMATE
+
+    has_exact_rows = session.scalar(
+        select(DailyBillingTotal.id).where(
+            DailyBillingTotal.connection_id == connection.id,
+            DailyBillingTotal.source_kind == SOURCE_KIND_DATA_EXPORT,
+        ).limit(1)
+    )
+    return TRUTH_MODE_EXACT if has_exact_rows else TRUTH_MODE_APPROXIMATE
 
 
 def range_start(range_key: str, today: date | None = None) -> date:
@@ -55,6 +95,25 @@ def latest_account_sync(session: Session, connection_id: int, account_id: int) -
         .order_by(SyncRun.finished_at.desc(), SyncRun.started_at.desc())
         .limit(1)
     ).scalar_one_or_none()
+
+
+def usage_sync_coverage(session: Session, connection_id: int, today: date | None = None) -> tuple[date, date] | None:
+    today = today or utc_today()
+    run = session.execute(
+        select(SyncRun)
+        .where(
+            SyncRun.connection_id == connection_id,
+            SyncRun.status.in_(("success", "partial_success")),
+        )
+        .order_by(SyncRun.finished_at.desc(), SyncRun.started_at.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    if not run or not run.finished_at or run.window_days < 1:
+        return None
+
+    coverage_end = min(run.finished_at.astimezone(timezone.utc).date(), today)
+    coverage_start = coverage_end - timedelta(days=run.window_days - 1)
+    return coverage_start, coverage_end
 
 
 def build_summary_response(session: Session, connection_id: int, range_key: str) -> dict:
@@ -111,7 +170,7 @@ def build_summary_response(session: Session, connection_id: int, range_key: str)
             )
         ) or 0.0
 
-    daily_costs = session.execute(
+    daily_cost_rows = session.execute(
         select(DailyAccountCost.day, func.sum(DailyAccountCost.cost_usd))
         .where(
             DailyAccountCost.connection_id == connection_id,
@@ -121,6 +180,7 @@ def build_summary_response(session: Session, connection_id: int, range_key: str)
         .group_by(DailyAccountCost.day)
         .order_by(DailyAccountCost.day)
     ).all()
+    daily_cost_map = {day: money(cost) for day, cost in daily_cost_rows}
 
     account_breakdown = session.execute(
         select(Account.id, Account.display_name, func.sum(DailyAccountCost.cost_usd))
@@ -162,6 +222,16 @@ def build_summary_response(session: Session, connection_id: int, range_key: str)
     if previous_total:
         delta_pct = ((float(total_cost or 0.0) - float(previous_total)) / float(previous_total)) * 100
 
+    coverage = usage_sync_coverage(session, connection_id, today)
+    if coverage:
+        coverage_start, coverage_end = coverage
+        daily_series = [
+            {"date": day.isoformat(), "cost": daily_cost_map.get(day, 0.0)}
+            for day in day_span(max(start_day, coverage_start), min(today, coverage_end))
+        ]
+    else:
+        daily_series = [{"date": day.isoformat(), "cost": cost} for day, cost in sorted(daily_cost_map.items())]
+
     return {
         "connection_id": connection_id,
         "range": range_key,
@@ -175,7 +245,7 @@ def build_summary_response(session: Session, connection_id: int, range_key: str)
             "services_covered": int(services_covered),
             "unallocated_share_pct": round((float(unallocated_cost) / float(total_cost or 1.0)) * 100, 2),
         },
-        "daily_costs": [{"date": day.isoformat(), "cost": money(cost)} for day, cost in daily_costs],
+        "daily_costs": daily_series,
         "cost_by_account": [{"key": account_id, "label": name, "cost": money(cost)} for account_id, name, cost in account_breakdown],
         "cost_by_service": [{"key": name, "label": name, "cost": money(cost)} for name, cost in service_breakdown],
         "cost_by_team": [{"key": name, "label": name, "cost": money(cost)} for name, cost in team_breakdown],
@@ -191,6 +261,7 @@ def build_accounts_response(session: Session, connection_id: int) -> dict:
     today = utc_today()
     last_30_start = today - timedelta(days=29)
     last_7_start = today - timedelta(days=6)
+    month_start = current_month_start(today)
     unallocated_team_id = session.scalar(select(Team.id).where(Team.name == "Unallocated"))
 
     rows = session.execute(
@@ -225,6 +296,29 @@ def build_accounts_response(session: Session, connection_id: int) -> dict:
                 Forecast.day > today,
             )
         )
+        gross_usage_mtd = session.scalar(
+            select(func.sum(DailyBillingTotal.gross_usage_usd)).where(
+                DailyBillingTotal.connection_id == connection_id,
+                DailyBillingTotal.account_id == account.id,
+                DailyBillingTotal.day >= month_start,
+                DailyBillingTotal.day <= today,
+            )
+        )
+        direct_net_due_mtd = session.scalar(
+            select(func.sum(DailyBillingTotal.net_due_usd)).where(
+                DailyBillingTotal.connection_id == connection_id,
+                DailyBillingTotal.account_id == account.id,
+                DailyBillingTotal.day >= month_start,
+                DailyBillingTotal.day <= today,
+            )
+        )
+        direct_net_projected_remainder = session.scalar(
+            select(func.sum(BillingForecast.projected_net_due_usd)).where(
+                BillingForecast.connection_id == connection_id,
+                BillingForecast.account_id == account.id,
+                BillingForecast.day > today,
+            )
+        )
         last_sync = latest_account_sync(session, connection_id, account.id)
 
         unallocated_share_pct = 0.0
@@ -252,6 +346,13 @@ def build_accounts_response(session: Session, connection_id: int) -> dict:
                 "current_30d_cost": money(current_30),
                 "last_7d_cost": money(last_7),
                 "forecast_total": money(projected),
+                "gross_usage_mtd_usd": money(gross_usage_mtd),
+                "direct_net_due_mtd_usd": money(direct_net_due_mtd),
+                "direct_projected_month_end_net_due_usd": round(
+                    money(direct_net_due_mtd) + money(direct_net_projected_remainder),
+                    2,
+                ),
+                "shared_adjustments_included": False,
                 "last_sync_at": last_sync.finished_at.isoformat() if last_sync and last_sync.finished_at else None,
                 "last_sync_status": last_sync.status if last_sync else "never",
                 "unallocated_share_pct": unallocated_share_pct,
@@ -361,12 +462,24 @@ def build_trends_response(session: Session, connection_id: int, range_key: str, 
         raise ValueError("group_by must be one of: account, service, team")
 
     totals = defaultdict(float)
-    series = []
+    cost_by_day_group: dict[tuple[date, str], float] = {}
     for day, group, amount in rows:
-        totals[group] += float(amount or 0.0)
-        series.append({"date": day.isoformat(), "group": group, "cost": money(amount)})
+        numeric_amount = float(amount or 0.0)
+        totals[group] += numeric_amount
+        cost_by_day_group[(day, group)] = numeric_amount
 
     total_items = [{"group": group, "total_cost": round(total_cost, 2)} for group, total_cost in sorted(totals.items(), key=lambda item: item[1], reverse=True)]
+    group_names = [item["group"] for item in total_items]
+    coverage = usage_sync_coverage(session, connection_id, today)
+    if coverage:
+        coverage_start, coverage_end = coverage
+        series = [
+            {"date": day.isoformat(), "group": group, "cost": money(cost_by_day_group.get((day, group), 0.0))}
+            for day in day_span(max(start_day, coverage_start), min(today, coverage_end))
+            for group in group_names
+        ]
+    else:
+        series = [{"date": day.isoformat(), "group": group, "cost": money(amount)} for (day, group), amount in sorted(cost_by_day_group.items())]
     return {
         "connection_id": connection_id,
         "range": range_key,
@@ -379,7 +492,7 @@ def build_trends_response(session: Session, connection_id: int, range_key: str, 
 
 def build_forecast_response(session: Session, connection_id: int) -> dict:
     today = utc_today()
-    month_start = today.replace(day=1)
+    month_start = current_month_start(today)
     month_label = month_start.strftime("%B %Y")
 
     actual_total = session.scalar(
@@ -446,6 +559,133 @@ def build_forecast_response(session: Session, connection_id: int) -> dict:
         },
         "accounts": account_items,
         "daily_projection": [{"date": day.isoformat(), "projected_cost": money(amount)} for day, amount in daily_projection_rows],
+    }
+
+
+def build_billing_overview_response(session: Session, connection_id: int) -> dict:
+    today = utc_today()
+    month_start = current_month_start(today)
+    month_label = month_start.strftime("%B %Y")
+    connection = session.get(Connection, connection_id)
+    if not connection:
+        raise ValueError("Connection not found")
+
+    actuals = session.execute(
+        select(
+            func.sum(DailyBillingTotal.gross_usage_usd),
+            func.sum(DailyBillingTotal.credits_usd),
+            func.sum(DailyBillingTotal.savings_discounts_usd),
+            func.sum(DailyBillingTotal.tax_usd),
+            func.sum(DailyBillingTotal.support_usd),
+            func.sum(DailyBillingTotal.marketplace_usd),
+            func.sum(DailyBillingTotal.refunds_usd),
+            func.sum(DailyBillingTotal.other_adjustments_usd),
+            func.sum(DailyBillingTotal.net_due_usd),
+        ).where(
+            DailyBillingTotal.connection_id == connection_id,
+            DailyBillingTotal.day >= month_start,
+            DailyBillingTotal.day <= today,
+        )
+    ).one()
+    gross_usage, credits, savings, tax, support, marketplace, refunds, other_adjustments, actual_net_due = actuals
+    credits_and_savings = money(credits) + money(savings)
+    bill_adjustments = round(
+        money(tax) + money(support) + money(marketplace) + money(other_adjustments) - money(refunds),
+        2,
+    )
+
+    projected_usage_remainder = session.scalar(
+        select(func.sum(BillingForecast.projected_net_due_usd - BillingForecast.projected_adjustments_usd)).where(
+            BillingForecast.connection_id == connection_id,
+            BillingForecast.account_id.is_(None),
+            BillingForecast.day > today,
+        )
+    )
+    projected_adjustments = session.scalar(
+        select(func.sum(BillingForecast.projected_adjustments_usd)).where(
+            BillingForecast.connection_id == connection_id,
+            BillingForecast.account_id.is_(None),
+            BillingForecast.day > today,
+        )
+    )
+    projected_net_due = session.scalar(
+        select(func.sum(BillingForecast.projected_net_due_usd)).where(
+            BillingForecast.connection_id == connection_id,
+            BillingForecast.account_id.is_(None),
+            BillingForecast.day > today,
+        )
+    )
+
+    actual_daily_rows = session.execute(
+        select(DailyBillingTotal.day, func.sum(DailyBillingTotal.net_due_usd))
+        .where(
+            DailyBillingTotal.connection_id == connection_id,
+            DailyBillingTotal.day >= month_start,
+            DailyBillingTotal.day <= today,
+        )
+        .group_by(DailyBillingTotal.day)
+        .order_by(DailyBillingTotal.day)
+    ).all()
+    month_end = (month_start.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
+    projected_daily_rows = session.execute(
+        select(BillingForecast.day, BillingForecast.projected_net_due_usd)
+        .where(
+            BillingForecast.connection_id == connection_id,
+            BillingForecast.account_id.is_(None),
+            BillingForecast.day > today,
+            BillingForecast.day <= month_end,
+        )
+        .order_by(BillingForecast.day)
+    ).all()
+    shared_rows = session.execute(
+        select(
+            func.sum(DailyBillingTotal.net_due_usd),
+            func.sum(DailyBillingTotal.credits_usd + DailyBillingTotal.savings_discounts_usd + DailyBillingTotal.refunds_usd),
+        ).where(
+            DailyBillingTotal.connection_id == connection_id,
+            DailyBillingTotal.account_id.is_(None),
+            DailyBillingTotal.day >= month_start,
+            DailyBillingTotal.day <= today,
+        )
+    ).one()
+    shared_adjustments_usd, shared_offsets = shared_rows
+
+    actual_map = {day: money(amount) for day, amount in actual_daily_rows}
+    projected_map = {day: money(amount) for day, amount in projected_daily_rows}
+    last_projected_day = max(projected_map.keys(), default=today)
+    daily_days = day_span(month_start, max(today, last_projected_day))
+
+    return {
+        "connection_id": connection_id,
+        "truth_mode": billing_truth_mode_for_connection(session, connection),
+        "month": month_label,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "actual_to_date": {
+            "gross_usage_usd": money(gross_usage),
+            "credits_and_savings_usd": round(credits_and_savings, 2),
+            "bill_adjustments_usd": bill_adjustments,
+            "net_due_usd": money(actual_net_due),
+        },
+        "projected_remainder": {
+            "usage_net_usd": money(projected_usage_remainder),
+            "bill_adjustments_usd": money(projected_adjustments),
+            "net_due_usd": money(projected_net_due),
+        },
+        "month_end_estimate": {
+            "net_due_usd": round(money(actual_net_due) + money(projected_net_due), 2),
+        },
+        "daily_net_due": [
+            {
+                "date": day.isoformat(),
+                "actual_net_due_usd": actual_map.get(day, 0.0),
+                "projected_net_due_usd": projected_map.get(day, 0.0),
+            }
+            for day in daily_days
+        ],
+        "reconciliation": {
+            "shared_adjustments_usd": money(shared_adjustments_usd),
+            "shared_offsets_present": money(shared_offsets) > 0,
+        },
     }
 
 
@@ -538,6 +778,11 @@ def list_connections_response(session: Session) -> dict:
                 "role_arn": connection.role_arn,
                 "external_id": connection.external_id,
                 "billing_view_arn": connection.billing_view_arn,
+                "billing_mode": connection.billing_mode,
+                "billing_export_bucket": connection.billing_export_bucket,
+                "billing_export_prefix": connection.billing_export_prefix,
+                "billing_export_region": connection.billing_export_region,
+                "billing_truth_mode": billing_truth_mode_for_connection(session, connection),
                 "team_tag_key": connection.team_tag_key,
                 "account_count": int(account_count),
                 "primary_account_name": primary_account,

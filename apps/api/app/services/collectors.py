@@ -28,6 +28,8 @@ from app.db.seed import (
     refresh_recent_demo_data,
     resolve_team_id_for_tag_value,
 )
+from app.services.billing import rebuild_connection_billing_truth
+from app.services.aws_access import build_cost_explorer_client, describe_aws_error
 
 
 class CollectorExecutionError(RuntimeError):
@@ -47,42 +49,15 @@ def utc_today() -> date:
     return datetime.now(timezone.utc).date()
 
 
-def get_boto3_session():
-    try:
-        import boto3
-    except ImportError as error:
-        raise CollectorExecutionError("boto3 is required for AWS-backed collectors") from error
-    return boto3.session.Session()
+def default_connection_sync_window_days(today: date | None = None) -> int:
+    today = today or utc_today()
+    # Keep at least a 30-day dashboard window populated while always covering month-to-date.
+    return max(32, today.day)
 
 
-def assume_role_session(role_arn: str, external_id: str | None):
-    session = get_boto3_session()
-    sts = session.client("sts")
-    params: dict[str, Any] = {
-        "RoleArn": role_arn,
-        "RoleSessionName": "aws-dashboard-sync",
-    }
-    if external_id:
-        params["ExternalId"] = external_id
-    credentials = sts.assume_role(**params)["Credentials"]
-    return session.__class__(
-        aws_access_key_id=credentials["AccessKeyId"],
-        aws_secret_access_key=credentials["SecretAccessKey"],
-        aws_session_token=credentials["SessionToken"],
-    )
-
-
-def build_cost_explorer_client(connection: Connection):
-    if connection.kind == "org_management":
-        session = assume_role_session(connection.role_arn, connection.external_id) if connection.role_arn else get_boto3_session()
-    elif connection.kind == "account_role":
-        if not connection.role_arn:
-            raise CollectorExecutionError("Standalone account-role connections require role_arn")
-        session = assume_role_session(connection.role_arn, connection.external_id)
-    else:
-        raise CollectorExecutionError(f"Unsupported collector kind '{connection.kind}'")
-
-    return session.client("ce", region_name="us-east-1")
+def combine_messages(*messages: str | None) -> str | None:
+    parts = [message.strip() for message in messages if message and message.strip()]
+    return " ".join(parts) if parts else None
 
 
 def build_ce_request(
@@ -450,7 +425,7 @@ def collect_org_management(session: Session, connection: Connection, days: int) 
                     team_rows[(account_id, current_day, team_id)] += metric_amount(group)
     except Exception as error:
         tag_query_failed = True
-        tag_error_message = str(error)
+        tag_error_message = describe_aws_error(error, "read cost allocation tag data")
         team_rows = defaultdict(float, build_unallocated_team_rows(session, account_totals))
 
     records_written = write_connection_window(
@@ -468,10 +443,12 @@ def collect_org_management(session: Session, connection: Connection, days: int) 
     except Exception:
         rebuild_local_forecasts(session, connection.id, end_day, model_version="aws-local-fallback-v1")
 
+    billing_result = rebuild_connection_billing_truth(session, connection, end_day, ce_client=client)
+    records_written += billing_result.records_written
     rebuild_connection_anomalies(session, connection.id, end_day)
     rebuild_connection_recommendations(session, connection.id, end_day)
 
-    message = tag_error_message if tag_query_failed else None
+    message = combine_messages(tag_error_message if tag_query_failed else None, billing_result.message)
     return CollectorResult(
         status="partial_success" if tag_query_failed else "success",
         accounts_synced=len(account_ids_by_aws_id),
@@ -535,7 +512,7 @@ def collect_account_role(session: Session, connection: Connection, days: int) ->
                     team_rows[(account.id, current_day, team_id)] += metric_amount(group)
     except Exception as error:
         tag_query_failed = True
-        tag_error_message = str(error)
+        tag_error_message = describe_aws_error(error, "read cost allocation tag data")
         team_rows = defaultdict(float, build_unallocated_team_rows(session, account_totals))
 
     records_written = write_connection_window(
@@ -553,10 +530,12 @@ def collect_account_role(session: Session, connection: Connection, days: int) ->
     except Exception:
         rebuild_local_forecasts(session, connection.id, end_day, model_version="aws-local-fallback-v1")
 
+    billing_result = rebuild_connection_billing_truth(session, connection, end_day, ce_client=client)
+    records_written += billing_result.records_written
     rebuild_connection_anomalies(session, connection.id, end_day)
     rebuild_connection_recommendations(session, connection.id, end_day)
 
-    message = tag_error_message if tag_query_failed else None
+    message = combine_messages(tag_error_message if tag_query_failed else None, billing_result.message)
     return CollectorResult(
         status="partial_success" if tag_query_failed else "success",
         accounts_synced=1,
@@ -593,20 +572,21 @@ def record_sync_run(
     )
 
 
-def sync_connection(session: Session, connection: Connection, days: int = 14) -> CollectorResult:
+def sync_connection(session: Session, connection: Connection, days: int | None = None) -> CollectorResult:
+    resolved_days = 14 if connection.kind == "demo" else (days if days is not None else default_connection_sync_window_days())
     try:
         if connection.kind == "demo":
-            result_data = refresh_recent_demo_data(session, days=days, connection_id=connection.id)
+            result_data = refresh_recent_demo_data(session, days=resolved_days, connection_id=connection.id)
             return CollectorResult(
                 status="success",
                 accounts_synced=result_data["accounts_synced"],
                 records_written=result_data["records_written"],
-                window_days=days,
+                window_days=resolved_days,
             )
         if connection.kind == "org_management":
-            result = collect_org_management(session, connection, days)
+            result = collect_org_management(session, connection, resolved_days)
         elif connection.kind == "account_role":
-            result = collect_account_role(session, connection, days)
+            result = collect_account_role(session, connection, resolved_days)
         else:
             raise CollectorExecutionError(f"Unsupported connection kind '{connection.kind}'")
 
@@ -623,15 +603,16 @@ def sync_connection(session: Session, connection: Connection, days: int = 14) ->
         return result
     except Exception as error:
         session.rollback()
+        safe_error = error if isinstance(error, CollectorExecutionError) else CollectorExecutionError(describe_aws_error(error, "sync AWS cost data"))
         if connection.kind != "demo":
             record_sync_run(
                 session,
                 connection,
                 status="failed",
-                days=days,
+                days=resolved_days,
                 records_written=0,
                 accounts_synced=0,
-                message=str(error),
+                message=str(safe_error),
             )
             session.commit()
-        raise
+        raise safe_error from error

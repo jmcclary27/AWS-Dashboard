@@ -42,6 +42,10 @@ class Connection(Base):
     role_arn: Mapped[str | None] = mapped_column(String(255), nullable=True)
     external_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
     billing_view_arn: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    billing_mode: Mapped[str] = mapped_column(String(32), default="payable_hybrid")
+    billing_export_bucket: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    billing_export_prefix: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    billing_export_region: Mapped[str | None] = mapped_column(String(64), nullable=True)
     team_tag_key: Mapped[str] = mapped_column(String(64), default="Team")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
@@ -133,6 +137,26 @@ class DailyTeamCost(Base):
     cost_usd: Mapped[float] = mapped_column(Float)
 
 
+class DailyBillingTotal(Base):
+    __tablename__ = "daily_billing_totals"
+    __table_args__ = (UniqueConstraint("connection_id", "account_id", "day", name="uq_daily_billing_totals"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    connection_id: Mapped[int] = mapped_column(Integer, ForeignKey("connections.id"), index=True)
+    account_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("accounts.id"), nullable=True, index=True)
+    day: Mapped[date] = mapped_column(Date, index=True)
+    gross_usage_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    credits_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    savings_discounts_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    tax_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    support_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    marketplace_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    refunds_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    other_adjustments_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    net_due_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    source_kind: Mapped[str] = mapped_column(String(32), default="demo")
+
+
 class Forecast(Base):
     __tablename__ = "forecasts"
 
@@ -141,6 +165,20 @@ class Forecast(Base):
     account_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("accounts.id"), nullable=True, index=True)
     day: Mapped[date] = mapped_column(Date, index=True)
     projected_cost_usd: Mapped[float] = mapped_column(Float)
+    model_version: Mapped[str] = mapped_column(String(32), default="demo-v1")
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class BillingForecast(Base):
+    __tablename__ = "billing_forecasts"
+    __table_args__ = (UniqueConstraint("connection_id", "account_id", "day", name="uq_billing_forecasts"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    connection_id: Mapped[int] = mapped_column(Integer, ForeignKey("connections.id"), index=True)
+    account_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("accounts.id"), nullable=True, index=True)
+    day: Mapped[date] = mapped_column(Date, index=True)
+    projected_net_due_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    projected_adjustments_usd: Mapped[float] = mapped_column(Float, default=0.0)
     model_version: Mapped[str] = mapped_column(String(32), default="demo-v1")
     generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 

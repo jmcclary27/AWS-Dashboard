@@ -43,7 +43,7 @@ export default function ServicesPage() {
       <PageHeader
         eyebrow="Service Breakdown"
         title="The expensive layers become legible fast."
-        description={`Tracing service concentration inside ${selectedConnection?.name ?? "the selected connection"} so organizational and standalone views stay independent.`}
+        description={`Tracing usage concentration inside ${selectedConnection?.name ?? "the selected connection"} so operational service analytics stay separate from payable bill-truth totals.`}
         action={
           <div className="flex flex-wrap gap-3">
             <select
@@ -81,12 +81,12 @@ export default function ServicesPage() {
           />
         </Panel>
 
-        <Panel title="Summary" subtitle="Useful at-a-glance context for the current filter">
+        <Panel title="Summary" subtitle="Usage analytics context for the current filter">
           <div className="rounded-[24px] bg-white/75 p-5">
             <p className="font-[family-name:var(--font-display)] text-4xl font-semibold text-slate-950">
               {uiHelpers.formatCurrency(services.data.summary.total_cost)}
             </p>
-            <p className="mt-2 text-sm text-slate-500">Total spend in the selected window</p>
+            <p className="mt-2 text-sm text-slate-500">Total usage cost in the selected window</p>
           </div>
           <div className="mt-5">
             <MetricRow label="Top service" value={services.data.summary.top_service ?? "N/A"} />
@@ -96,7 +96,7 @@ export default function ServicesPage() {
         </Panel>
       </div>
 
-      <Panel title="Service leaderboard" subtitle="Latest spend, average daily cost, and recent directional change">
+      <Panel title="Service leaderboard" subtitle="Latest usage cost, average daily cost, and recent directional change">
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {services.data.items.map((item) => (
             <div key={item.service_name} className="rounded-[24px] border border-slate-200/70 bg-white/75 p-5">

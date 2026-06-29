@@ -9,6 +9,7 @@ import {
   MetricRow,
   PageHeader,
   Panel,
+  StatusPill,
   RecommendationCard,
   StatCard,
   uiHelpers
@@ -16,7 +17,7 @@ import {
 import { useApiData, withConnectionId } from "@/lib/api";
 import type {
   AnomaliesResponse,
-  ForecastResponse,
+  BillingOverviewResponse,
   RecommendationsResponse,
   SummaryResponse
 } from "@/lib/types";
@@ -24,7 +25,7 @@ import type {
 export default function DashboardPage() {
   const { loading: connectionLoading, error: connectionError, selectedConnection, selectedConnectionId } = useConnection();
   const summary = useApiData<SummaryResponse>(selectedConnectionId ? withConnectionId("/summary?range=30d", selectedConnectionId) : null);
-  const forecast = useApiData<ForecastResponse>(selectedConnectionId ? withConnectionId("/forecast", selectedConnectionId) : null);
+  const billing = useApiData<BillingOverviewResponse>(selectedConnectionId ? withConnectionId("/billing/overview", selectedConnectionId) : null);
   const anomalies = useApiData<AnomaliesResponse>(selectedConnectionId ? withConnectionId("/anomalies", selectedConnectionId) : null);
   const recommendations = useApiData<RecommendationsResponse>(selectedConnectionId ? withConnectionId("/recommendations", selectedConnectionId) : null);
 
@@ -40,106 +41,112 @@ export default function DashboardPage() {
     return <ErrorState message="No available connection. Initialize the demo dataset or create an AWS connection." />;
   }
 
-  if (summary.loading || forecast.loading || anomalies.loading || recommendations.loading) {
+  if (summary.loading || billing.loading || anomalies.loading || recommendations.loading) {
     return <LoadingState label="Loading the command center..." />;
   }
 
-  if (summary.error || forecast.error || anomalies.error || recommendations.error || !summary.data || !forecast.data || !anomalies.data || !recommendations.data) {
-    return <ErrorState message={summary.error ?? forecast.error ?? anomalies.error ?? recommendations.error ?? "Unable to load the dashboard."} />;
+  if (summary.error || billing.error || anomalies.error || recommendations.error || !summary.data || !billing.data || !anomalies.data || !recommendations.data) {
+    return <ErrorState message={summary.error ?? billing.error ?? anomalies.error ?? recommendations.error ?? "Unable to load the dashboard."} />;
   }
 
   const topAnomalies = anomalies.data.items.slice(0, 3);
   const topRecommendations = recommendations.data.items.slice(0, 3);
+  const payableSeries = billing.data.daily_net_due.map((item) => ({
+    date: item.date,
+    cost: item.actual_net_due_usd + item.projected_net_due_usd
+  }));
 
   return (
     <div className="space-y-6">
       <PageHeader
         eyebrow={selectedConnection?.kind === "org_management" ? "Organization Scope" : selectedConnection?.kind === "account_role" ? "Standalone Scope" : "FinOps MVP"}
         title="Local cost visibility with a real deployment runway."
-        description={`Viewing ${selectedConnection?.name ?? "the active connection"} through the FastAPI layer so org, standalone, and demo data stay isolated instead of blending together.`}
+        description={`Viewing ${selectedConnection?.name ?? "the active connection"} through separate workload and bill-truth layers so usage analytics stay useful while payable totals stay as close to AWS month-end charges as possible.`}
       />
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <StatCard
-          label="30-Day Spend"
-          value={uiHelpers.formatCurrency(summary.data.totals.total_cost)}
-          detail={`${uiHelpers.formatPercent(summary.data.totals.delta_pct)} versus the prior period`}
+          label="Month-To-Date Due"
+          value={uiHelpers.formatCurrency(billing.data.actual_to_date.net_due_usd)}
+          detail={billing.data.truth_mode === "exact" ? "Exact bill-truth actuals from AWS Data Exports." : "Approximate net-due actuals from Cost Explorer fallback."}
           accent="blue"
         />
         <StatCard
-          label="Month Forecast"
-          value={uiHelpers.formatCurrency(forecast.data.overall.projected_total)}
-          detail={`${uiHelpers.formatCurrency(forecast.data.overall.projected_remainder)} still projected this month`}
+          label="Projected Month-End"
+          value={uiHelpers.formatCurrency(billing.data.month_end_estimate.net_due_usd)}
+          detail={`${uiHelpers.formatCurrency(billing.data.projected_remainder.net_due_usd)} still projected this month`}
           accent="orange"
         />
         <StatCard
-          label="Accounts"
-          value={String(summary.data.totals.active_accounts)}
-          detail={`${summary.data.totals.services_covered} services currently represented in the dataset`}
+          label="Gross Usage"
+          value={uiHelpers.formatCurrency(billing.data.actual_to_date.gross_usage_usd)}
+          detail="Pre-credit service activity for the current month."
           accent="teal"
         />
         <StatCard
-          label="Unallocated"
-          value={`${summary.data.totals.unallocated_share_pct.toFixed(1)}%`}
-          detail="Spend with missing or unknown team tags stays visible instead of disappearing."
+          label="Credits & Savings"
+          value={uiHelpers.formatCurrency(billing.data.actual_to_date.credits_and_savings_usd)}
+          detail="Offsets currently reducing what AWS says you owe."
           accent="orange"
         />
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[1.65fr_1fr]">
-        <Panel title="Daily spend pulse" subtitle="Last 30 days across all seeded AWS accounts">
-          <SpendLineChart data={summary.data.daily_costs} />
+        <Panel title="Daily payable pulse" subtitle={`${billing.data.month} actuals and projected remainder`}>
+          <SpendLineChart data={payableSeries} />
         </Panel>
 
-        <Panel title="Top services" subtitle="Current 30-day contribution by AWS service">
+        <Panel title="Top services" subtitle="Usage analytics still stay separate from bill-truth totals">
           <BreakdownBarChart data={summary.data.cost_by_service.slice(0, 6)} />
         </Panel>
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
-        <Panel title="Forecast posture" subtitle={forecast.data.month}>
+        <Panel title="Payable outlook" subtitle={billing.data.month}>
           <div className="grid gap-4 md:grid-cols-2">
             <div className="rounded-[24px] bg-white/75 p-5">
-              <p className="text-xs uppercase tracking-[0.24em] text-slate-500">Overall</p>
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-xs uppercase tracking-[0.24em] text-slate-500">Overall</p>
+                <StatusPill label={billing.data.truth_mode} />
+              </div>
               <p className="mt-3 font-[family-name:var(--font-display)] text-4xl font-semibold text-slate-950">
-                {uiHelpers.formatCurrency(forecast.data.overall.projected_total)}
+                {uiHelpers.formatCurrency(billing.data.month_end_estimate.net_due_usd)}
               </p>
               <div className="mt-4">
-                <MetricRow label="Actual to date" value={uiHelpers.formatCurrency(forecast.data.overall.actual_to_date)} />
-                <MetricRow label="Projected remainder" value={uiHelpers.formatCurrency(forecast.data.overall.projected_remainder)} tone="warm" />
+                <MetricRow label="Actual to date" value={uiHelpers.formatCurrency(billing.data.actual_to_date.net_due_usd)} />
+                <MetricRow label="Projected remainder" value={uiHelpers.formatCurrency(billing.data.projected_remainder.net_due_usd)} tone="warm" />
+                <MetricRow label="Bill adjustments" value={uiHelpers.formatCurrency(billing.data.actual_to_date.bill_adjustments_usd)} />
               </div>
             </div>
             <div className="rounded-[24px] bg-slate-900 p-5 text-white">
-              <p className="text-xs uppercase tracking-[0.24em] text-slate-300">Latest sync</p>
+              <p className="text-xs uppercase tracking-[0.24em] text-slate-300">Reconciliation</p>
               <p className="mt-3 font-[family-name:var(--font-display)] text-2xl font-semibold">
-                {uiHelpers.formatDateTimeLabel(summary.data.sync_status.last_run_at)}
+                {uiHelpers.formatCurrency(billing.data.actual_to_date.net_due_usd)}
               </p>
               <div className="mt-4">
-                <MetricRow label="Status" value={summary.data.sync_status.status} tone="good" />
-                <MetricRow label="Projected services" value={String(summary.data.totals.services_covered)} />
+                <MetricRow label="Gross usage" value={uiHelpers.formatCurrency(billing.data.actual_to_date.gross_usage_usd)} />
+                <MetricRow label="Offsets applied" value={uiHelpers.formatCurrency(billing.data.actual_to_date.credits_and_savings_usd)} tone="good" />
+                <MetricRow label="Shared adjustments" value={uiHelpers.formatCurrency(billing.data.reconciliation.shared_adjustments_usd)} />
               </div>
             </div>
           </div>
           <div className="mt-5 space-y-3">
-            {forecast.data.accounts.slice(0, 4).map((account) => (
-              <div key={account.account_id} className="rounded-[22px] border border-slate-200/70 bg-white/75 p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="font-semibold text-slate-900">{account.account_name}</p>
-                    <p className="text-sm text-slate-500">
-                      {uiHelpers.formatCurrency(account.actual_to_date)} actual + {uiHelpers.formatCurrency(account.projected_remainder)} projected
-                    </p>
-                  </div>
-                  <p className="font-[family-name:var(--font-display)] text-2xl font-semibold text-slate-950">
-                    {uiHelpers.formatCurrency(account.projected_total)}
-                  </p>
-                </div>
+            <div className="rounded-[22px] border border-slate-200/70 bg-white/75 p-4">
+              <p className="font-semibold text-slate-900">How the payable total is built</p>
+              <div className="mt-3">
+                <MetricRow label="Gross usage" value={uiHelpers.formatCurrency(billing.data.actual_to_date.gross_usage_usd)} />
+                <MetricRow label="Minus credits and savings" value={uiHelpers.formatCurrency(billing.data.actual_to_date.credits_and_savings_usd)} tone="good" />
+                <MetricRow label="Plus bill adjustments" value={uiHelpers.formatCurrency(billing.data.actual_to_date.bill_adjustments_usd)} />
+                <MetricRow label="Equals current net due" value={uiHelpers.formatCurrency(billing.data.actual_to_date.net_due_usd)} tone="warm" />
               </div>
-            ))}
+              <p className="mt-3 text-sm text-slate-500">
+                Shared payer-level offsets and bill items are kept at the connection level instead of being forced into per-account allocations.
+              </p>
+            </div>
           </div>
         </Panel>
 
-        <Panel title="Signal board" subtitle="Persisted findings from the latest seeded analytics run">
+        <Panel title="Signal board" subtitle="Usage analytics still drive anomalies and recommendations">
           <div className="space-y-4">
             {topAnomalies.map((item) => (
               <AnomalyCard

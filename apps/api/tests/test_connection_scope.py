@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, func, select
@@ -242,3 +242,34 @@ def test_account_role_collector_writes_only_primary_account(monkeypatch) -> None
         assert result.accounts_synced == 1
         account_ids = session.scalars(select(DailyAccountCost.account_id).where(DailyAccountCost.connection_id == connection.id)).all()
         assert account_ids == [account.id]
+
+
+def test_sync_connection_uses_calendar_aware_default_window(monkeypatch) -> None:
+    session_factory = make_session_factory()
+    fixed_today = date(2026, 6, 28)
+
+    with session_factory() as session:
+        ensure_reference_data(session)
+        connection = Connection(name="Default Window", kind="org_management", enabled=True, team_tag_key="Team")
+        session.add(connection)
+        session.commit()
+        session.refresh(connection)
+
+        captured: dict[str, int] = {}
+
+        def fake_collect_org_management(session, connection, days):
+            captured["days"] = days
+            return collectors.CollectorResult(
+                status="success",
+                accounts_synced=0,
+                records_written=0,
+                window_days=days,
+            )
+
+        monkeypatch.setattr(collectors, "utc_today", lambda: fixed_today)
+        monkeypatch.setattr(collectors, "collect_org_management", fake_collect_org_management)
+
+        result = collectors.sync_connection(session, connection, days=None)
+
+        assert captured["days"] == 32
+        assert result.window_days == 32

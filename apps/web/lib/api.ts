@@ -46,13 +46,14 @@ export function useApiData<T>(path: string | null) {
     }
 
     let active = true;
+    const requestPath = path;
 
     async function load() {
       setLoading(true);
       setError(null);
 
       try {
-        const nextData = await apiRequest<T>(path);
+        const nextData = await apiRequest<T>(requestPath);
         if (active) {
           setData(nextData);
         }

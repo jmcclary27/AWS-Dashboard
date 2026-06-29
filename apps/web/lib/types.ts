@@ -33,6 +33,10 @@ export type AccountItem = {
   current_30d_cost: number;
   last_7d_cost: number;
   forecast_total: number;
+  gross_usage_mtd_usd: number;
+  direct_net_due_mtd_usd: number;
+  direct_projected_month_end_net_due_usd: number;
+  shared_adjustments_included: boolean;
   last_sync_at: string | null;
   last_sync_status: string;
   unallocated_share_pct: number;
@@ -93,6 +97,36 @@ export type ForecastResponse = {
   daily_projection: Array<{ date: string; projected_cost: number }>;
 };
 
+export type BillingOverviewResponse = {
+  connection_id: number;
+  truth_mode: "exact" | "approximate";
+  month: string;
+  generated_at: string;
+  actual_to_date: {
+    gross_usage_usd: number;
+    credits_and_savings_usd: number;
+    bill_adjustments_usd: number;
+    net_due_usd: number;
+  };
+  projected_remainder: {
+    usage_net_usd: number;
+    bill_adjustments_usd: number;
+    net_due_usd: number;
+  };
+  month_end_estimate: {
+    net_due_usd: number;
+  };
+  daily_net_due: Array<{
+    date: string;
+    actual_net_due_usd: number;
+    projected_net_due_usd: number;
+  }>;
+  reconciliation: {
+    shared_adjustments_usd: number;
+    shared_offsets_present: boolean;
+  };
+};
+
 export type RecommendationsResponse = {
   connection_id: number;
   items: Array<{
@@ -141,6 +175,11 @@ export type ConnectionItem = {
   role_arn: string | null;
   external_id: string | null;
   billing_view_arn: string | null;
+  billing_mode: "usage_only" | "payable_hybrid";
+  billing_export_bucket: string | null;
+  billing_export_prefix: string | null;
+  billing_export_region: string | null;
+  billing_truth_mode: "exact" | "approximate";
   team_tag_key: string;
   account_count: number;
   primary_account_name: string | null;
@@ -165,4 +204,39 @@ export type SyncRunsResponse = {
     started_at: string | null;
     finished_at: string | null;
   }>;
+};
+
+export type AwsRuntimeResponse = {
+  status: "ready" | "error";
+  configured: boolean;
+  identity_verified: boolean;
+  credential_source: string | null;
+  profile: string | null;
+  region: string;
+  caller: {
+    account_id: string;
+    arn: string;
+    user_id: string;
+  } | null;
+  message: string;
+};
+
+export type ConnectionValidationResponse = {
+  connection_id: number;
+  kind: "demo" | "org_management" | "account_role";
+  ready: boolean;
+  status: "ready" | "error";
+  truth_mode: "exact" | "approximate";
+  credential_source: string | null;
+  identity: {
+    account_id: string;
+    arn: string;
+    user_id: string;
+  } | null;
+  checks: Array<{
+    code: string;
+    status: "success" | "warning" | "error";
+    message: string;
+  }>;
+  message: string;
 };

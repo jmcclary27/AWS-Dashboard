@@ -14,8 +14,10 @@ from app.schemas.api import (
     SyncRequest,
     SyncResponse,
 )
+from app.services.aws_access import inspect_aws_runtime, validate_connection_access
 from app.services.analytics import (
     build_accounts_response,
+    build_billing_overview_response,
     build_forecast_response,
     build_services_response,
     build_summary_response,
@@ -65,12 +67,25 @@ def list_connections(db: Session = Depends(get_db)) -> dict:
     return list_connections_response(db)
 
 
+@router.get("/aws/runtime")
+def aws_runtime_status() -> dict:
+    return inspect_aws_runtime()
+
+
 @router.get("/connections/{connection_id}")
 def get_connection(connection_id: int, db: Session = Depends(get_db)) -> dict:
     connection = db.get(Connection, connection_id)
     if not connection:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Connection not found")
     return {"item": serialize_connection_item(db, connection)}
+
+
+@router.post("/connections/{connection_id}/validate")
+def validate_connection(connection_id: int, db: Session = Depends(get_db)) -> dict:
+    connection = db.get(Connection, connection_id)
+    if not connection:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Connection not found")
+    return validate_connection_access(db, connection)
 
 
 @router.post("/connections", status_code=status.HTTP_201_CREATED)
@@ -82,6 +97,10 @@ def create_connection(payload: ConnectionCreate, db: Session = Depends(get_db)) 
         role_arn=payload.role_arn,
         external_id=payload.external_id,
         billing_view_arn=payload.billing_view_arn,
+        billing_mode=payload.billing_mode,
+        billing_export_bucket=payload.billing_export_bucket,
+        billing_export_prefix=payload.billing_export_prefix,
+        billing_export_region=payload.billing_export_region,
         team_tag_key=payload.team_tag_key,
     )
     db.add(connection)
@@ -196,7 +215,7 @@ def sync_selected_connection(
     if not connection:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Connection not found")
     try:
-        result = sync_connection(db, connection, days=payload.days if payload else 14)
+        result = sync_connection(db, connection, days=payload.days if payload else None)
     except CollectorExecutionError as error:
         raise bad_request(str(error)) from error
     except Exception as error:
@@ -242,6 +261,15 @@ def list_accounts(
 ) -> dict:
     connection = resolve_connection_or_400(db, connection_id)
     return build_accounts_response(db, connection.id)
+
+
+@router.get("/billing/overview")
+def get_billing_overview(
+    connection_id: int | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> dict:
+    connection = resolve_connection_or_400(db, connection_id)
+    return build_billing_overview_response(db, connection.id)
 
 
 @router.post("/accounts", status_code=status.HTTP_201_CREATED)

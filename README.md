@@ -17,6 +17,7 @@ This repository now implements a connection-scoped MVP slice from the attached p
 - FastAPI endpoints under `/api/v1` for connection CRUD, sync runs, and connection-scoped analytics
 - a built-in demo connection with 90 days of seeded cost data
 - AWS-ready org-management and standalone account-role collector seams
+- a payable-billing truth layer that uses AWS Data Exports when available and falls back to approximate Cost Explorer net values when it is not
 - Docker Compose wiring for `web`, `api`, and `postgres`
 
 ## Quick start
@@ -26,9 +27,21 @@ This repository now implements a connection-scoped MVP slice from the attached p
 3. Open `http://localhost:3000` for the web app.
 4. Open `http://localhost:8000/docs` for the FastAPI docs.
 
+## Real AWS syncs
+
+The app does not store AWS access keys in the database or browser state. AWS-backed syncs use ambient credentials inside the API runtime plus optional role assumption per connection.
+
+1. Authenticate on the host first, for example with `aws sso login --profile your-profile` or temporary environment credentials.
+2. Set `AWS_PROFILE` and `AWS_CONFIG_DIR` in `.env`.
+3. Start the stack with `docker compose -f docker-compose.yml -f docker-compose.aws.yml up --build`.
+4. Open `Settings` and check the `AWS runtime` panel.
+5. Configure `billing export bucket`, `prefix`, and `region` on connections where you want exact payable billing truth from AWS Data Exports.
+6. Create an `org_management` or `account_role` connection, then use `Validate Access` before running a sync.
+
 ## Useful commands
 
 - `docker compose up --build`
+- `docker compose -f docker-compose.yml -f docker-compose.aws.yml up --build`
 - `docker compose down`
 - `python -m pytest apps/api/tests`
 - `corepack enable pnpm && pnpm --filter web dev`
@@ -37,12 +50,15 @@ This repository now implements a connection-scoped MVP slice from the attached p
 ## API surface
 
 - `GET /api/v1/connections`
+- `GET /api/v1/aws/runtime`
 - `POST /api/v1/connections`
 - `GET /api/v1/connections/{id}`
 - `PATCH /api/v1/connections/{id}`
+- `POST /api/v1/connections/{id}/validate`
 - `POST /api/v1/connections/{id}/sync`
 - `GET /api/v1/sync-runs?connection_id=...`
 - `GET /api/v1/accounts`
+- `GET /api/v1/billing/overview?connection_id=...`
 - `POST /api/v1/accounts`
 - `PATCH /api/v1/accounts/{id}`
 - `POST /api/v1/accounts/{id}/sync`
@@ -59,4 +75,6 @@ This repository now implements a connection-scoped MVP slice from the attached p
 - The frontend never reads Postgres directly; all data flows through FastAPI.
 - The active dashboard scope is one connection at a time so demo, org, and standalone views do not double-count.
 - The current local default is still demo-first, but the API and schema now support AWS-backed collector implementations.
+- Dashboard headline pricing is now payable-first: exact when AWS Data Exports are reachable and fresh, approximate when the app falls back to Cost Explorer net values.
+- The safest local AWS path is a read-only `~/.aws` mount or short-lived environment credentials passed only to the `api` container.
 - Helm templates and OpenTofu rollout assets remain staged for later infrastructure work.

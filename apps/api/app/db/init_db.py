@@ -1,17 +1,19 @@
 from pathlib import Path
+from datetime import date
 
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, inspect, select
 
 from app.config import get_settings
-from app.db.models import DailyAccountCost
+from app.db.models import DailyAccountCost, DailyBillingTotal
 from app.db.seed import ensure_reference_data, reset_demo_dataset
 from app.db.session import get_session_local
+from app.services.billing import build_demo_billing_truth
 
 
 BASELINE_REVISION = "0001_baseline"
-HEAD_REVISION = "0002_connection_scope"
+HEAD_REVISION = "0003_payable_billing_truth"
 
 
 def legacy_schema_revision(database_url: str) -> str | None:
@@ -53,11 +55,14 @@ def main() -> None:
     run_migrations()
 
     with get_session_local()() as session:
-        ensure_reference_data(session)
+        demo_connection, _, _ = ensure_reference_data(session)
         has_costs = session.scalar(select(DailyAccountCost.id).limit(1))
         if not has_costs:
             reset_demo_dataset(session, days=settings.seed_days)
         else:
+            has_billing = session.scalar(select(DailyBillingTotal.id).limit(1))
+            if not has_billing:
+                build_demo_billing_truth(session, demo_connection, date.today())
             session.commit()
 
 

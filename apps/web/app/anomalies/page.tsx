@@ -34,9 +34,9 @@ export default function AnomaliesPage() {
       <PageHeader
         eyebrow="Anomalies"
         title="Spend spikes stay visible instead of surprising us at month end."
-        description={`Persisted anomalies for ${selectedConnection?.name ?? "the selected connection"}, kept scoped so one dataset cannot pollute another.`}
+        description={`Persisted usage anomalies for ${selectedConnection?.name ?? "the selected connection"}, kept scoped so one dataset cannot pollute another or get mistaken for payable bill truth.`}
       />
-      <Panel title="Latest findings" subtitle="Daily spikes, team growth patterns, and unallocated spend warnings">
+      <Panel title="Latest findings" subtitle="Daily spikes, team growth patterns, and unallocated usage warnings">
         <div className="grid gap-4 md:grid-cols-2">
           {anomalies.data.items.map((item) => (
             <AnomalyCard

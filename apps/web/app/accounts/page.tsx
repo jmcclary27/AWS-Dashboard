@@ -66,8 +66,7 @@ export default function AccountsPage() {
     setSyncing(true);
     try {
       const result = await apiRequest<SyncResponse>(`/connections/${selectedConnectionId}/sync`, {
-        method: "POST",
-        body: JSON.stringify({ days: 14 })
+        method: "POST"
       });
       setMessage(
         result.message
@@ -111,7 +110,7 @@ export default function AccountsPage() {
       <PageHeader
         eyebrow="Account Inventory"
         title={`${selectedConnection.name} account membership`}
-        description="Canonical AWS accounts stay separate from ingestion scope, so the same account can exist in multiple connections without corrupting totals."
+        description="Canonical AWS accounts stay separate from ingestion scope, while direct payable fields stay separate from shared payer-level credits and bill adjustments."
         action={
           <button
             onClick={syncConnection}
@@ -179,24 +178,28 @@ export default function AccountsPage() {
             <div className="space-y-3 rounded-[24px] bg-white/75 p-5 text-sm leading-7 text-slate-600">
               <p><strong>Kind:</strong> {selectedConnection.kind}</p>
               <p><strong>Team Tag Key:</strong> {selectedConnection.team_tag_key}</p>
+              <p><strong>Billing Truth:</strong> {selectedConnection.billing_truth_mode}</p>
               <p><strong>Accounts In Scope:</strong> {selectedConnection.account_count}</p>
               {selectedConnection.primary_account_name ? <p><strong>Primary Account:</strong> {selectedConnection.primary_account_name}</p> : null}
               <div className="flex flex-wrap gap-2 pt-2">
                 <StatusPill label={selectedConnection.kind} />
                 <StatusPill label={selectedConnection.enabled ? "enabled" : "disabled"} />
+                <StatusPill label={selectedConnection.billing_truth_mode} />
               </div>
             </div>
           )}
         </Panel>
 
-        <Panel title="Visible accounts" subtitle="Connection membership, 30-day spend, forecast, unallocated share, and latest sync status">
+        <Panel title="Visible accounts" subtitle="30-day usage stays operational, while direct payable fields exclude shared org-level offsets and bill adjustments.">
           <div className="overflow-x-auto">
             <table className="min-w-full">
               <thead>
                 <tr className="text-left text-xs uppercase tracking-[0.18em] text-slate-500">
                   <th className="pb-4 pr-4">Account</th>
-                  <th className="pb-4 pr-4">30d spend</th>
-                  <th className="pb-4 pr-4">Forecast</th>
+                  <th className="pb-4 pr-4">30d usage</th>
+                  <th className="pb-4 pr-4">Gross MTD</th>
+                  <th className="pb-4 pr-4">Direct due MTD</th>
+                  <th className="pb-4 pr-4">Direct month-end</th>
                   <th className="pb-4 pr-4">Unallocated</th>
                   <th className="pb-4 pr-4">Last sync</th>
                   <th className="pb-4 text-right">Action</th>

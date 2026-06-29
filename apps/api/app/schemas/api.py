@@ -32,6 +32,10 @@ class ConnectionCreate(BaseModel):
     role_arn: str | None = Field(default=None, max_length=255)
     external_id: str | None = Field(default=None, max_length=120)
     billing_view_arn: str | None = Field(default=None, max_length=2048)
+    billing_mode: Literal["usage_only", "payable_hybrid"] = "payable_hybrid"
+    billing_export_bucket: str | None = Field(default=None, max_length=255)
+    billing_export_prefix: str | None = Field(default=None, max_length=1024)
+    billing_export_region: str | None = Field(default=None, max_length=64)
     team_tag_key: str = Field(default="Team", min_length=1, max_length=64)
     account: ConnectionAccountInput | None = None
 
@@ -53,12 +57,16 @@ class ConnectionPatch(BaseModel):
     role_arn: str | None = Field(default=None, max_length=255)
     external_id: str | None = Field(default=None, max_length=120)
     billing_view_arn: str | None = Field(default=None, max_length=2048)
+    billing_mode: Literal["usage_only", "payable_hybrid"] | None = None
+    billing_export_bucket: str | None = Field(default=None, max_length=255)
+    billing_export_prefix: str | None = Field(default=None, max_length=1024)
+    billing_export_region: str | None = Field(default=None, max_length=64)
     team_tag_key: str | None = Field(default=None, min_length=1, max_length=64)
     account: ConnectionAccountInput | None = None
 
 
 class SyncRequest(BaseModel):
-    days: int = Field(default=14, ge=1, le=365)
+    days: int | None = Field(default=None, ge=1, le=365)
 
 
 class SyncResponse(BaseModel):

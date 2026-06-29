@@ -34,7 +34,7 @@ def test_run_migrations_upgrades_legacy_schema_without_alembic_version(monkeypat
 
         with engine.connect() as connection:
             revision = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-        assert revision == "0002_connection_scope"
+            assert revision == "0003_payable_billing_truth"
     finally:
         engine.dispose()
         get_settings.cache_clear()
