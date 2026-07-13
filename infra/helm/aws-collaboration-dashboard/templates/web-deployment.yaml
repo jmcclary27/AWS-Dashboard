@@ -30,6 +30,46 @@ spec:
             - name: http
               containerPort: {{ .Values.web.service.port }}
               protocol: TCP
+          env:
+            # NEXT_PUBLIC_AUTH_ENABLED must also have been supplied when this
+            # image was built. Next.js inlines NEXT_PUBLIC_* values into the
+            # browser bundle, while the remaining values are read by the
+            # server-side auth route handlers at runtime.
+            - name: NEXT_PUBLIC_AUTH_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "aws-collaboration-dashboard.configMapName" . }}
+                  key: NEXT_PUBLIC_AUTH_ENABLED
+            - name: COGNITO_DOMAIN
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "aws-collaboration-dashboard.configMapName" . }}
+                  key: COGNITO_DOMAIN
+            - name: COGNITO_CLIENT_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "aws-collaboration-dashboard.configMapName" . }}
+                  key: COGNITO_CLIENT_ID
+            - name: COGNITO_SCOPES
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "aws-collaboration-dashboard.configMapName" . }}
+                  key: COGNITO_SCOPES
+            - name: COGNITO_REDIRECT_URI
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "aws-collaboration-dashboard.configMapName" . }}
+                  key: COGNITO_REDIRECT_URI
+            - name: COGNITO_LOGOUT_URI
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "aws-collaboration-dashboard.configMapName" . }}
+                  key: COGNITO_LOGOUT_URI
+            - name: COGNITO_REFRESH_TOKEN_MAX_AGE_SECONDS
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "aws-collaboration-dashboard.configMapName" . }}
+                  key: COGNITO_REFRESH_TOKEN_MAX_AGE_SECONDS
           livenessProbe:
             httpGet:
               path: /

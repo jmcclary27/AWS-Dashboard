@@ -16,6 +16,11 @@ FROM base AS builder
 ARG NEXT_PUBLIC_API_BASE_URL=/api/v1
 ENV NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL}
 
+# This value gates the browser auth shell and is therefore intentionally a
+# build argument rather than a runtime-only container setting.
+ARG NEXT_PUBLIC_AUTH_ENABLED=false
+ENV NEXT_PUBLIC_AUTH_ENABLED=${NEXT_PUBLIC_AUTH_ENABLED}
+
 COPY --from=dependencies /workspace/node_modules /workspace/node_modules
 COPY --from=dependencies /workspace/apps/web/node_modules /workspace/apps/web/node_modules
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml /workspace/

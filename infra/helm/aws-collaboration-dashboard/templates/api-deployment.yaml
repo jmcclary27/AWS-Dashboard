@@ -56,6 +56,61 @@ spec:
                 configMapKeyRef:
                   name: {{ include "aws-collaboration-dashboard.configMapName" . }}
                   key: SEED_DAYS
+            - name: AUTH_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "aws-collaboration-dashboard.configMapName" . }}
+                  key: AUTH_ENABLED
+            - name: PUBLIC_APP_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "aws-collaboration-dashboard.configMapName" . }}
+                  key: PUBLIC_APP_URL
+            - name: AUTH_CLOCK_SKEW_SECONDS
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "aws-collaboration-dashboard.configMapName" . }}
+                  key: AUTH_CLOCK_SKEW_SECONDS
+            - name: COGNITO_DOMAIN
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "aws-collaboration-dashboard.configMapName" . }}
+                  key: COGNITO_DOMAIN
+            - name: COGNITO_REGION
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "aws-collaboration-dashboard.configMapName" . }}
+                  key: COGNITO_REGION
+            - name: COGNITO_USER_POOL_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "aws-collaboration-dashboard.configMapName" . }}
+                  key: COGNITO_USER_POOL_ID
+            - name: COGNITO_APP_CLIENT_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "aws-collaboration-dashboard.configMapName" . }}
+                  key: COGNITO_APP_CLIENT_ID
+            - name: COGNITO_ISSUER
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "aws-collaboration-dashboard.configMapName" . }}
+                  key: COGNITO_ISSUER
+            - name: COGNITO_JWKS_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "aws-collaboration-dashboard.configMapName" . }}
+                  key: COGNITO_JWKS_URL
+            - name: COGNITO_USERINFO_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "aws-collaboration-dashboard.configMapName" . }}
+                  key: COGNITO_USERINFO_URL
+            - name: COGNITO_JWKS_CACHE_SECONDS
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "aws-collaboration-dashboard.configMapName" . }}
+                  key: COGNITO_JWKS_CACHE_SECONDS
           {{- with .Values.aws.existingSecret }}
           envFrom:
             - secretRef:

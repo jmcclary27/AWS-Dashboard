@@ -131,19 +131,17 @@ class AccountRoleStubClient:
         }
 
 
-def test_connections_route_requires_explicit_scope_when_multiple_non_demo_connections() -> None:
+def test_connection_scoped_routes_require_an_explicit_connection_id() -> None:
     session_factory = make_session_factory()
     with session_factory() as session:
         ensure_reference_data(session)
-        session.add(Connection(name="Org A", kind="org_management", enabled=True, team_tag_key="Team"))
-        session.add(Connection(name="Org B", kind="org_management", enabled=True, team_tag_key="Team"))
         session.commit()
 
     with make_test_client(session_factory) as client:
         response = client.get("/api/v1/summary?range=30d")
 
-    assert response.status_code == 400
-    assert "Multiple enabled connections" in response.json()["detail"]
+    assert response.status_code == 422
+    assert "connection_id" in response.text
 
 
 def test_create_account_role_connection_creates_primary_membership() -> None:
@@ -153,9 +151,13 @@ def test_create_account_role_connection_creates_primary_membership() -> None:
         session.commit()
 
     with make_test_client(session_factory) as client:
+        me = client.get("/api/v1/me")
+        assert me.status_code == 200
+        workspace_id = next(item["id"] for item in me.json()["workspaces"] if not item["is_demo"])
         response = client.post(
             "/api/v1/connections",
             json={
+                "workspace_id": workspace_id,
                 "name": "Standalone Finance",
                 "kind": "account_role",
                 "enabled": True,
@@ -169,6 +171,8 @@ def test_create_account_role_connection_creates_primary_membership() -> None:
         )
 
     assert response.status_code == 201
+    assert response.json()["item"]["workspace_id"] == workspace_id
+    assert response.json()["item"]["external_id_configured"] is False
     with session_factory() as session:
         connection = session.execute(select(Connection).where(Connection.name == "Standalone Finance")).scalar_one()
         membership = session.execute(
@@ -180,8 +184,14 @@ def test_create_account_role_connection_creates_primary_membership() -> None:
 def test_org_management_collector_writes_connection_scoped_data_and_forecast_fallback(monkeypatch) -> None:
     session_factory = make_session_factory()
     with session_factory() as session:
-        ensure_reference_data(session)
-        connection = Connection(name="Org Scope", kind="org_management", enabled=True, team_tag_key="Team")
+        demo_connection, _, _ = ensure_reference_data(session)
+        connection = Connection(
+            workspace_id=demo_connection.workspace_id,
+            name="Org Scope",
+            kind="org_management",
+            enabled=True,
+            team_tag_key="Team",
+        )
         session.add(connection)
         session.commit()
         session.refresh(connection)
@@ -200,8 +210,14 @@ def test_org_management_collector_writes_connection_scoped_data_and_forecast_fal
 def test_org_management_collector_uses_unallocated_when_tag_query_fails(monkeypatch) -> None:
     session_factory = make_session_factory()
     with session_factory() as session:
-        ensure_reference_data(session)
-        connection = Connection(name="Org Partial", kind="org_management", enabled=True, team_tag_key="Team")
+        demo_connection, _, _ = ensure_reference_data(session)
+        connection = Connection(
+            workspace_id=demo_connection.workspace_id,
+            name="Org Partial",
+            kind="org_management",
+            enabled=True,
+            team_tag_key="Team",
+        )
         session.add(connection)
         session.commit()
         session.refresh(connection)
@@ -220,9 +236,10 @@ def test_org_management_collector_uses_unallocated_when_tag_query_fails(monkeypa
 def test_account_role_collector_writes_only_primary_account(monkeypatch) -> None:
     session_factory = make_session_factory()
     with session_factory() as session:
-        ensure_reference_data(session)
+        demo_connection, _, _ = ensure_reference_data(session)
         account = collectors.upsert_canonical_account(session, "888888888888", "Standalone Prod", "Team")
         connection = Connection(
+            workspace_id=demo_connection.workspace_id,
             name="Standalone Scope",
             kind="account_role",
             enabled=True,
@@ -249,8 +266,14 @@ def test_sync_connection_uses_calendar_aware_default_window(monkeypatch) -> None
     fixed_today = date(2026, 6, 28)
 
     with session_factory() as session:
-        ensure_reference_data(session)
-        connection = Connection(name="Default Window", kind="org_management", enabled=True, team_tag_key="Team")
+        demo_connection, _, _ = ensure_reference_data(session)
+        connection = Connection(
+            workspace_id=demo_connection.workspace_id,
+            name="Default Window",
+            kind="org_management",
+            enabled=True,
+            team_tag_key="Team",
+        )
         session.add(connection)
         session.commit()
         session.refresh(connection)

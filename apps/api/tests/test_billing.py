@@ -102,6 +102,7 @@ def test_build_billing_overview_response_prefers_exact_truth() -> None:
         demo_connection, accounts, _ = ensure_reference_data(session)
         account = accounts[0]
         connection = Connection(
+            workspace_id=demo_connection.workspace_id,
             name="Exact Billing",
             kind="account_role",
             enabled=True,
@@ -190,10 +191,11 @@ def test_build_accounts_response_includes_direct_payable_fields() -> None:
     tomorrow = today + timedelta(days=1)
 
     with session_factory() as session:
-        ensure_reference_data(session)
+        demo_connection, _, _ = ensure_reference_data(session)
         account = session.scalars(select(Account).limit(1)).first()
         assert account is not None
         connection = Connection(
+            workspace_id=demo_connection.workspace_id,
             name="Direct Billing",
             kind="account_role",
             enabled=True,
@@ -256,10 +258,11 @@ def test_build_summary_response_zero_fills_requested_range() -> None:
     start_day = today - timedelta(days=29)
 
     with session_factory() as session:
-        ensure_reference_data(session)
+        demo_connection, _, _ = ensure_reference_data(session)
         account = session.scalars(select(Account).limit(1)).first()
         assert account is not None
         connection = Connection(
+            workspace_id=demo_connection.workspace_id,
             name="Summary Fill",
             kind="account_role",
             enabled=True,
@@ -312,11 +315,12 @@ def test_build_trends_response_zero_fills_missing_days() -> None:
     start_day = today - timedelta(days=29)
 
     with session_factory() as session:
-        ensure_reference_data(session)
+        demo_connection, _, _ = ensure_reference_data(session)
         account = session.scalars(select(Account).limit(1)).first()
         assert account is not None
         account_name = account.display_name
         connection = Connection(
+            workspace_id=demo_connection.workspace_id,
             name="Trend Fill",
             kind="account_role",
             enabled=True,
@@ -370,10 +374,11 @@ def test_build_billing_overview_response_zero_fills_month_start() -> None:
     month_start = today.replace(day=1)
 
     with session_factory() as session:
-        ensure_reference_data(session)
+        demo_connection, _, _ = ensure_reference_data(session)
         account = session.scalars(select(Account).limit(1)).first()
         assert account is not None
         connection = Connection(
+            workspace_id=demo_connection.workspace_id,
             name="Billing Fill",
             kind="account_role",
             enabled=True,

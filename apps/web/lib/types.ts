@@ -26,8 +26,6 @@ export type AccountItem = {
   id: number;
   display_name: string;
   aws_account_id: string;
-  role_arn: string | null;
-  external_id: string | null;
   team_tag_key: string;
   enabled: boolean;
   current_30d_cost: number;
@@ -172,13 +170,7 @@ export type ConnectionItem = {
   name: string;
   kind: "demo" | "org_management" | "account_role";
   enabled: boolean;
-  role_arn: string | null;
-  external_id: string | null;
-  billing_view_arn: string | null;
   billing_mode: "usage_only" | "payable_hybrid";
-  billing_export_bucket: string | null;
-  billing_export_prefix: string | null;
-  billing_export_region: string | null;
   billing_truth_mode: "exact" | "approximate";
   team_tag_key: string;
   account_count: number;
@@ -188,7 +180,98 @@ export type ConnectionItem = {
 };
 
 export type ConnectionsResponse = {
+  workspace_id: number;
+  role: "owner" | "editor" | "viewer";
+  read_only: boolean;
   items: ConnectionItem[];
+};
+
+export type WorkspaceItem = {
+  id: number;
+  name: string;
+  role: "owner" | "editor" | "viewer";
+  is_demo: boolean;
+  read_only: boolean;
+};
+
+export type MeResponse = {
+  user: {
+    id: number;
+    email: string | null;
+    display_name: string;
+  };
+  workspaces: WorkspaceItem[];
+};
+
+export type ConnectionConfigItem = {
+  id: number;
+  workspace_id: number;
+  name: string;
+  kind: "demo" | "org_management" | "account_role";
+  enabled: boolean;
+  role_arn: string | null;
+  external_id_configured: boolean;
+  billing_view_arn: string | null;
+  billing_mode: "usage_only" | "payable_hybrid";
+  billing_export_bucket: string | null;
+  billing_export_prefix: string | null;
+  billing_export_region: string | null;
+  team_tag_key: string;
+  created_by_user_id: number | null;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+export type ConnectionConfigResponse = { item: ConnectionConfigItem };
+
+export type WorkspaceMembersResponse = {
+  workspace_id: number;
+  items: Array<{
+    user_id: number;
+    email: string;
+    display_name: string;
+    role: "owner" | "editor" | "viewer";
+    created_at: string | null;
+  }>;
+};
+
+export type WorkspaceInviteResponse = {
+  item: {
+    id: number;
+    email: string;
+    role: "editor" | "viewer";
+    expires_at: string;
+    invite_url: string;
+  };
+};
+
+export type WorkspaceInvitesResponse = {
+  workspace_id: number;
+  items: Array<{
+    id: number;
+    email: string;
+    role: "editor" | "viewer";
+    status: "pending" | "accepted" | "revoked" | "expired";
+    expires_at: string;
+    created_at: string | null;
+  }>;
+};
+
+export type AuditEventsResponse = {
+  workspace_id: number;
+  next_before_id: number | null;
+  items: Array<{
+    id: number;
+    action: string;
+    outcome: string;
+    target_type: string | null;
+    target_id: string | null;
+    connection_id: number | null;
+    actor_name: string | null;
+    request_id: string | null;
+    metadata: Record<string, unknown>;
+    created_at: string;
+  }>;
 };
 
 export type SyncRunsResponse = {
@@ -204,21 +287,6 @@ export type SyncRunsResponse = {
     started_at: string | null;
     finished_at: string | null;
   }>;
-};
-
-export type AwsRuntimeResponse = {
-  status: "ready" | "error";
-  configured: boolean;
-  identity_verified: boolean;
-  credential_source: string | null;
-  profile: string | null;
-  region: string;
-  caller: {
-    account_id: string;
-    arn: string;
-    user_id: string;
-  } | null;
-  message: string;
 };
 
 export type ConnectionValidationResponse = {

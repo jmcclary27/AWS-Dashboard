@@ -6,6 +6,8 @@
 2. Run `docker compose up --build`.
 3. Visit `http://localhost:3000`.
 
+The default Compose environment keeps `AUTH_ENABLED=false` and opens the seeded Demo Workspace through the local development identity. This is for self-contained development only. For a local Cognito test, configure the local callback and logout URLs in Cognito, set both `AUTH_ENABLED=true` and `NEXT_PUBLIC_AUTH_ENABLED=true`, populate the Cognito variables, and rerun `docker compose up --build`. See [Cognito authentication and workspace access](authentication.md) for the complete setup and migration rollout requirements.
+
 ## Real AWS path
 
 Use this only when you want real org-management or standalone account-role data.
@@ -14,9 +16,9 @@ Use this only when you want real org-management or standalone account-role data.
 2. Set `AWS_PROFILE` in `.env`.
 3. Set `AWS_CONFIG_DIR` in `.env` to your host AWS config directory.
 4. Start the stack with `docker compose -f docker-compose.yml -f docker-compose.aws.yml up --build`.
-5. Open `Settings` and confirm the `AWS runtime` panel shows a verified caller identity.
+5. Select a workspace, then open `Settings` as an owner or editor.
 6. If you want exact payable billing truth, configure the connection with an AWS Data Exports bucket, prefix, and region that the assumed role can read.
-7. Create or update your connection, then run `Validate Access` before `Sync`.
+7. Create or update your connection, then run `Validate Access` before requesting `Sync`.
 
 Security notes:
 
@@ -38,12 +40,13 @@ Frontend host workflows expect `pnpm`, while the API uses Python tooling.
 
 ## Demo behavior
 
-The initial boot seeds 90 days of synthetic cost data into the built-in demo connection.
+The initial boot seeds 90 days of synthetic cost data into the built-in Demo Workspace and connection.
 
-- The web app now scopes every analytics request by `connection_id`.
-- The settings page is the primary UI for creating org-management and standalone account-role connections.
+- Every signed-in user has virtual viewer access to the Demo Workspace; it is read-only and cannot be synced, shared, or audited by normal users.
+- The web app scopes analytics by an authorized `connection_id` and its selected workspace.
+- The settings page is the primary UI for owners and editors to create org-management and standalone account-role connections.
 - The dashboard now prefers payable bill truth for month-to-date and projected month-end totals, while services, trends, anomalies, and recommendations stay on the usage analytics layer.
-- Demo sync continues to refresh a rolling 14-day window so local work stays near-zero cost even before AWS credentials are configured.
+- Demo data is seeded during bootstrap so local work stays near-zero cost even before AWS credentials are configured; normal users cannot request demo syncs.
 
 ## Local Kubernetes path
 

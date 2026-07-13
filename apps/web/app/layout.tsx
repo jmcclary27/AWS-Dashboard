@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Suspense, type ReactNode } from "react";
 
 import { AppFrame } from "@/components/app-frame";
+import { AuthGate } from "@/components/auth-gate";
 import { ConnectionProvider } from "@/components/connection-provider";
 
 import "./globals.css";
@@ -16,9 +17,11 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
     <html lang="en">
       <body>
         <Suspense fallback={<div className="page-loading">Loading dashboard…</div>}>
-          <ConnectionProvider>
-            <AppFrame>{children}</AppFrame>
-          </ConnectionProvider>
+          <AuthGate>
+            <ConnectionProvider>
+              <AppFrame>{children}</AppFrame>
+            </ConnectionProvider>
+          </AuthGate>
         </Suspense>
       </body>
     </html>

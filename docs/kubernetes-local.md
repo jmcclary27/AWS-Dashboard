@@ -14,7 +14,7 @@ Build the local images from the repository root. The web build argument is compi
 
 ```powershell
 docker build -t aws-dashboard-api:local -f apps/api/Dockerfile .
-docker build --build-arg NEXT_PUBLIC_API_BASE_URL=/api/v1 -t aws-dashboard-web:local -f apps/web/Dockerfile .
+docker build --build-arg NEXT_PUBLIC_API_BASE_URL=/api/v1 --build-arg NEXT_PUBLIC_AUTH_ENABLED=false -t aws-dashboard-web:local -f apps/web/Dockerfile .
 
 k3d cluster create cloud-cost --agents 1 -p "8080:80@loadbalancer"
 k3d image import -c cloud-cost aws-dashboard-api:local aws-dashboard-web:local
@@ -27,6 +27,18 @@ Open `http://dashboard.localhost:8080`. Traefik routes `/api` to FastAPI and all
 If another local service already owns port `8080`, choose an unused host port when creating the cluster, for example `-p "18080:80@loadbalancer"`, and substitute that port in the URLs above. The Helm chart itself does not need to change.
 
 The chart uses a normal, revision-named bootstrap Job instead of a Helm migration hook. This lets `helm upgrade --install --wait --wait-for-jobs` wait for PostgreSQL, migrations, and demo seeding without racing API startup.
+
+## Cognito (optional)
+
+The local chart defaults to `auth.enabled: false`, which is the intended k3d demo path. The `dashboard.localhost` ingress is plain HTTP, while Cognito requires HTTPS for non-local callback hosts, so use Docker Compose on `http://localhost:3000` for local Cognito experiments or provide a TLS-enabled public host for an authenticated Helm deployment.
+
+For an authenticated deployment, create a private values file with `auth.enabled`, `auth.publicAppUrl`, `api.corsOrigins`, `auth.cognito`, and, only when migrating existing non-demo data, `auth.bootstrapOwner`. Build the web image with the matching browser flag before importing it:
+
+```powershell
+docker build --build-arg NEXT_PUBLIC_API_BASE_URL=/api/v1 --build-arg NEXT_PUBLIC_AUTH_ENABLED=true -t aws-dashboard-web:local -f apps/web/Dockerfile .
+```
+
+The callback and logout URLs in `auth.cognito` must match the public ingress host exactly. Cognito uses a public PKCE client; do not put a client secret in Helm values. The chart gives the API its verifier and user-info settings, the web server its Managed Login settings, and the bootstrap Job only the migration-owner and issuer inputs. See [Cognito authentication and workspace access](authentication.md) for the full rollout sequence.
 
 ## Real AWS credentials
 
@@ -51,7 +63,7 @@ The source identity needs STS access and permission to assume any configured con
 
 ```powershell
 kubectl -n aws-dashboard get pods,jobs,pvc
-Invoke-WebRequest http://localhost:8080/api/v1/connections
+Invoke-WebRequest http://localhost:8080/api/v1/me
 
 kubectl -n aws-dashboard port-forward service/aws-dashboard-api 8000:8000
 # In another terminal:
@@ -59,7 +71,7 @@ Invoke-WebRequest http://localhost:8000/health
 Invoke-WebRequest http://localhost:8000/ready
 ```
 
-In the dashboard, open **Settings**, confirm the AWS runtime if credentials were supplied, then validate and manually sync a real connection. The API records the sync result in the persistent PostgreSQL volume.
+In the dashboard, select a workspace and open **Settings**. As an owner or editor, validate and manually sync a real connection. The API records the sync result in the persistent PostgreSQL volume.
 
 Run a second Helm upgrade with the same values and confirm the PVC stays bound and the bootstrap Job completes again. `--reuse-values` preserves `aws.existingSecret` when it was supplied on the original install:
 
@@ -68,4 +80,4 @@ helm upgrade aws-dashboard infra/helm/aws-collaboration-dashboard --namespace aw
 kubectl -n aws-dashboard get pvc,jobs
 ```
 
-The chart deliberately does not include a collector CronJob, TLS, authentication, monitoring, or public-VPS provisioning. PostgreSQL storage is retained for local inspection; remove the PVC manually when you intentionally want to reset the database.
+The chart deliberately does not include a collector CronJob, public TLS provisioning, monitoring, or public-VPS provisioning. PostgreSQL storage is retained for local inspection; remove the PVC manually when you intentionally want to reset the database.

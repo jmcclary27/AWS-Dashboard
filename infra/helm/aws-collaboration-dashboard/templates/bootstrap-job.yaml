@@ -83,5 +83,40 @@ spec:
                 configMapKeyRef:
                   name: {{ include "aws-collaboration-dashboard.configMapName" . }}
                   key: SEED_DAYS
+            - name: COGNITO_ISSUER
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "aws-collaboration-dashboard.configMapName" . }}
+                  key: COGNITO_ISSUER
+            - name: COGNITO_REGION
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "aws-collaboration-dashboard.configMapName" . }}
+                  key: COGNITO_REGION
+            - name: COGNITO_USER_POOL_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "aws-collaboration-dashboard.configMapName" . }}
+                  key: COGNITO_USER_POOL_ID
+            - name: AUTH_BOOTSTRAP_OWNER_SUB
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "aws-collaboration-dashboard.configMapName" . }}
+                  key: AUTH_BOOTSTRAP_OWNER_SUB
+            - name: AUTH_BOOTSTRAP_OWNER_EMAIL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "aws-collaboration-dashboard.configMapName" . }}
+                  key: AUTH_BOOTSTRAP_OWNER_EMAIL
+            - name: AUTH_BOOTSTRAP_OWNER_ISSUER
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "aws-collaboration-dashboard.configMapName" . }}
+                  key: AUTH_BOOTSTRAP_OWNER_ISSUER
+            - name: AUTH_BOOTSTRAP_WORKSPACE_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "aws-collaboration-dashboard.configMapName" . }}
+                  key: AUTH_BOOTSTRAP_WORKSPACE_NAME
           resources:
             {{- toYaml .Values.api.resources | nindent 12 }}

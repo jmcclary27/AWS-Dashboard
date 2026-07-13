@@ -13,3 +13,24 @@ data:
   API_PORT: {{ .Values.api.service.port | quote }}
   CORS_ORIGINS: {{ .Values.api.corsOrigins | quote }}
   SEED_DAYS: {{ .Values.api.seedDays | quote }}
+  AUTH_ENABLED: {{ .Values.auth.enabled | quote }}
+  PUBLIC_APP_URL: {{ .Values.auth.publicAppUrl | quote }}
+  AUTH_CLOCK_SKEW_SECONDS: {{ .Values.auth.clockSkewSeconds | quote }}
+  COGNITO_DOMAIN: {{ .Values.auth.cognito.domain | quote }}
+  COGNITO_CLIENT_ID: {{ .Values.auth.cognito.clientId | quote }}
+  COGNITO_APP_CLIENT_ID: {{ .Values.auth.cognito.clientId | quote }}
+  COGNITO_REGION: {{ .Values.auth.cognito.region | quote }}
+  COGNITO_USER_POOL_ID: {{ .Values.auth.cognito.userPoolId | quote }}
+  COGNITO_ISSUER: {{ .Values.auth.cognito.issuer | quote }}
+  COGNITO_JWKS_URL: {{ .Values.auth.cognito.jwksUrl | quote }}
+  COGNITO_USERINFO_URL: {{ .Values.auth.cognito.userinfoUrl | quote }}
+  COGNITO_JWKS_CACHE_SECONDS: {{ .Values.auth.cognito.jwksCacheSeconds | quote }}
+  COGNITO_SCOPES: {{ .Values.auth.cognito.scopes | quote }}
+  COGNITO_REDIRECT_URI: {{ .Values.auth.cognito.redirectUri | quote }}
+  COGNITO_LOGOUT_URI: {{ .Values.auth.cognito.logoutUri | quote }}
+  COGNITO_REFRESH_TOKEN_MAX_AGE_SECONDS: {{ .Values.auth.cognito.refreshTokenMaxAgeSeconds | quote }}
+  NEXT_PUBLIC_AUTH_ENABLED: {{ .Values.auth.enabled | quote }}
+  AUTH_BOOTSTRAP_OWNER_SUB: {{ .Values.auth.bootstrapOwner.subject | quote }}
+  AUTH_BOOTSTRAP_OWNER_EMAIL: {{ .Values.auth.bootstrapOwner.email | quote }}
+  AUTH_BOOTSTRAP_OWNER_ISSUER: {{ .Values.auth.bootstrapOwner.issuer | quote }}
+  AUTH_BOOTSTRAP_WORKSPACE_NAME: {{ .Values.auth.bootstrapOwner.workspaceName | quote }}

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import type { ReactNode } from "react";
 
+import { AuthControls } from "@/components/auth-controls";
 import { useConnection } from "@/components/connection-provider";
 
 const navItems = [
@@ -19,12 +20,55 @@ const navItems = [
 export function AppFrame({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const { connections, selectedConnection, selectedConnectionId, setSelectedConnectionId, loading } = useConnection();
+  const {
+    user,
+    workspaces,
+    selectedWorkspace,
+    selectedWorkspaceId,
+    setSelectedWorkspaceId,
+    connections,
+    selectedConnection,
+    selectedConnectionId,
+    setSelectedConnectionId,
+    loading
+  } = useConnection();
   const currentSearch = searchParams.toString();
 
   function hrefWithScope(path: string) {
     return currentSearch ? `${path}?${currentSearch}` : path;
   }
+
+  const workspacePicker = (
+    <select
+      value={selectedWorkspaceId ?? ""}
+      onChange={(event) => setSelectedWorkspaceId(Number(event.target.value))}
+      className="mt-3 w-full rounded-2xl border border-slate-200 bg-white/85 px-4 py-3 text-sm text-slate-900"
+      disabled={loading || workspaces.length === 0}
+      aria-label="Workspace scope"
+    >
+      {workspaces.map((workspace) => (
+        <option key={workspace.id} value={workspace.id}>
+          {workspace.name} ({workspace.role}{workspace.read_only ? ", read-only" : ""})
+        </option>
+      ))}
+    </select>
+  );
+
+  const connectionPicker = (
+    <select
+      value={selectedConnectionId ?? ""}
+      onChange={(event) => setSelectedConnectionId(Number(event.target.value))}
+      className="mt-3 w-full rounded-2xl border border-slate-200 bg-white/85 px-4 py-3 text-sm text-slate-900"
+      disabled={loading || connections.length === 0}
+      aria-label="Connection scope"
+    >
+      {connections.map((connection) => (
+        <option key={connection.id} value={connection.id}>
+          {connection.name} ({connection.kind})
+        </option>
+      ))}
+    </select>
+  );
 
   return (
     <div className="min-h-screen font-[family-name:var(--font-body)] text-slate-900">
@@ -38,24 +82,17 @@ export function AppFrame({ children }: { children: ReactNode }) {
                 <span className="gradient-text block">Cost Console</span>
               </h1>
               <p className="mt-3 text-sm leading-6 text-slate-600">
-                A demo-first FinOps command center built to grow from Compose into Kubernetes.
+                A secure, scoped FinOps command center built to grow from Compose into Kubernetes.
               </p>
             </div>
 
             <div className="mt-6">
+              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Workspace</p>
+              {workspacePicker}
+            </div>
+            <div className="mt-4">
               <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Connection Scope</p>
-              <select
-                value={selectedConnectionId ?? ""}
-                onChange={(event) => setSelectedConnectionId(Number(event.target.value))}
-                className="mt-3 w-full rounded-2xl border border-slate-200 bg-white/85 px-4 py-3 text-sm text-slate-900"
-                disabled={loading || connections.length === 0}
-              >
-                {connections.map((connection) => (
-                  <option key={connection.id} value={connection.id}>
-                    {connection.name} ({connection.kind})
-                  </option>
-                ))}
-              </select>
+              {connectionPicker}
             </div>
 
             <nav className="mt-8 space-y-2">
@@ -77,41 +114,48 @@ export function AppFrame({ children }: { children: ReactNode }) {
               })}
             </nav>
 
-            <div className="mt-auto rounded-3xl bg-slate-900 p-5 text-white">
-              <p className="text-xs uppercase tracking-[0.24em] text-slate-300">Current Mode</p>
-              <p className="mt-3 font-[family-name:var(--font-display)] text-xl">
-                {selectedConnection?.name ?? "Loading..."}
-              </p>
-              <p className="mt-2 text-sm text-slate-300">
-                {selectedConnection
-                  ? `${selectedConnection.kind} connection with ${selectedConnection.account_count} visible account${selectedConnection.account_count === 1 ? "" : "s"}.`
-                  : "Resolving the active connection scope."}
-              </p>
+            <div className="mt-auto space-y-3 rounded-3xl bg-slate-900 p-5 text-white">
+              <div>
+                <p className="text-xs uppercase tracking-[0.24em] text-slate-300">Current Scope</p>
+                <p className="mt-3 font-[family-name:var(--font-display)] text-xl">
+                  {selectedConnection?.name ?? selectedWorkspace?.name ?? "Loading..."}
+                </p>
+                <p className="mt-2 text-sm text-slate-300">
+                  {selectedConnection
+                    ? `${selectedConnection.kind} connection with ${selectedConnection.account_count} visible account${selectedConnection.account_count === 1 ? "" : "s"}.`
+                    : "Choose a connection in this authorized workspace."}
+                </p>
+              </div>
+              <AuthControls displayName={user?.display_name ?? null} />
             </div>
           </aside>
 
           <main className="flex-1 pb-10">
-            <div className="glass-panel mb-6 flex items-center justify-between rounded-[28px] px-5 py-4 lg:hidden">
+            <div className="glass-panel mb-6 flex flex-wrap items-center justify-between gap-3 rounded-[28px] px-5 py-4 lg:hidden">
               <div>
                 <p className="text-xs uppercase tracking-[0.28em] text-slate-500">AWS Portfolio</p>
                 <p className="font-[family-name:var(--font-display)] text-xl font-semibold">Cost Console</p>
               </div>
-              <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center gap-3">
+                <select
+                  value={selectedWorkspaceId ?? ""}
+                  onChange={(event) => setSelectedWorkspaceId(Number(event.target.value))}
+                  className="rounded-full border border-slate-200 bg-white/85 px-4 py-2 text-sm text-slate-900"
+                  disabled={loading || workspaces.length === 0}
+                  aria-label="Workspace scope"
+                >
+                  {workspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}
+                </select>
                 <select
                   value={selectedConnectionId ?? ""}
                   onChange={(event) => setSelectedConnectionId(Number(event.target.value))}
                   className="rounded-full border border-slate-200 bg-white/85 px-4 py-2 text-sm text-slate-900"
                   disabled={loading || connections.length === 0}
+                  aria-label="Connection scope"
                 >
-                  {connections.map((connection) => (
-                    <option key={connection.id} value={connection.id}>
-                      {connection.name}
-                    </option>
-                  ))}
+                  {connections.map((connection) => <option key={connection.id} value={connection.id}>{connection.name}</option>)}
                 </select>
-                <Link href={hrefWithScope("/dashboard")} className="rounded-full bg-slate-900 px-4 py-2 text-sm text-white">
-                  Home
-                </Link>
+                <AuthControls displayName={user?.display_name ?? null} />
               </div>
             </div>
             {children}

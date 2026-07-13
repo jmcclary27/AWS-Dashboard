@@ -26,6 +26,7 @@ class ConnectionAccountInput(BaseModel):
 
 
 class ConnectionCreate(BaseModel):
+    workspace_id: int = Field(gt=0)
     name: str = Field(min_length=3, max_length=120)
     kind: Literal["org_management", "account_role"]
     enabled: bool = True

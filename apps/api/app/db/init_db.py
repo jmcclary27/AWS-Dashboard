@@ -14,6 +14,8 @@ from app.services.billing import build_demo_billing_truth
 
 
 BASELINE_REVISION = "0001_baseline"
+CONNECTION_SCOPE_REVISION = "0002_connection_scope"
+PRE_TENANCY_REVISION = "0003_payable_billing_truth"
 
 
 def get_alembic_head_revision(database_url: str | None = None) -> str | None:
@@ -38,7 +40,11 @@ def legacy_schema_revision(database_url: str) -> str | None:
     if "alembic_version" in table_names:
         return None
     if "connections" in table_names and "connection_accounts" in table_names:
-        return get_alembic_head_revision(database_url)
+        # Do not stamp an unversioned pre-tenancy database at the current head:
+        # 0004 must still add workspace ownership to those existing rows.
+        if {"daily_billing_totals", "billing_forecasts"}.issubset(table_names):
+            return PRE_TENANCY_REVISION
+        return CONNECTION_SCOPE_REVISION
     if "accounts" in table_names:
         return BASELINE_REVISION
     return None

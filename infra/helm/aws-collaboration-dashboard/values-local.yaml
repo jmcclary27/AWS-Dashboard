@@ -19,6 +19,9 @@ postgres:
 api:
   corsOrigins: http://dashboard.localhost:8080
 
+auth:
+  publicAppUrl: http://dashboard.localhost:8080
+
 ingress:
   enabled: true
   className: traefik

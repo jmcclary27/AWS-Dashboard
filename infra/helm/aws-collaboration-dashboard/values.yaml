@@ -57,6 +57,38 @@ api:
       cpu: 500m
       memory: 512Mi
 
+# Cognito uses a public OAuth client with authorization-code + PKCE, so no
+# client secret is stored in this chart. Leave authentication disabled for the
+# self-contained local demo. For an authenticated deployment, set enabled,
+# the Cognito values, and build the web image with the same
+# NEXT_PUBLIC_AUTH_ENABLED value before installing the chart.
+auth:
+  enabled: false
+  publicAppUrl: http://localhost:3000
+  clockSkewSeconds: 60
+  cognito:
+    domain: ""
+    clientId: ""
+    region: ""
+    userPoolId: ""
+    # Issuer and JWKS URL are derived from region + user-pool ID when blank.
+    issuer: ""
+    jwksUrl: ""
+    jwksCacheSeconds: 3600
+    # Use the standard Managed Login userInfo endpoint when blank.
+    userinfoUrl: ""
+    scopes: "openid email profile"
+    redirectUri: ""
+    logoutUri: ""
+    refreshTokenMaxAgeSeconds: 2592000
+  # Required only when the tenancy migration encounters existing non-demo
+  # connections. It intentionally fails without an explicit owner.
+  bootstrapOwner:
+    subject: ""
+    email: ""
+    issuer: ""
+    workspaceName: ""
+
 web:
   replicaCount: 1
   service:

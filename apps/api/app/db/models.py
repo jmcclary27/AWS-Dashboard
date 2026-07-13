@@ -3,7 +3,20 @@ from __future__ import annotations
 from typing import Any
 from datetime import date, datetime, timezone
 
-from sqlalchemy import Boolean, Column, Date, DateTime, Float, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    Column,
+    Date,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    JSON,
+    String,
+    Text,
+    UniqueConstraint,
+)
 
 try:
     from sqlalchemy.orm import Mapped, mapped_column
@@ -16,6 +29,10 @@ from app.db.base import Base
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+WORKSPACE_ROLES = ("owner", "editor", "viewer")
+INVITABLE_WORKSPACE_ROLES = ("editor", "viewer")
 
 
 class Account(Base):
@@ -32,11 +49,94 @@ class Account(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
 
-class Connection(Base):
-    __tablename__ = "connections"
+class User(Base):
+    """An application user keyed by the stable identity asserted by Cognito."""
+
+    __tablename__ = "users"
+    __table_args__ = (UniqueConstraint("identity_issuer", "subject", name="uq_users_identity_issuer_subject"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    name: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    identity_issuer: Mapped[str] = mapped_column(String(255), nullable=False)
+    subject: Mapped[str] = mapped_column(String(255), nullable=False)
+    email: Mapped[str] = mapped_column(String(320), nullable=False, index=True)
+    display_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
+
+
+class Workspace(Base):
+    __tablename__ = "workspaces"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    is_demo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
+    created_by_user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
+
+
+class WorkspaceMembership(Base):
+    __tablename__ = "workspace_memberships"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "user_id", name="uq_workspace_memberships_workspace_user"),
+        CheckConstraint("role IN ('owner', 'editor', 'viewer')", name="ck_workspace_memberships_role"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    workspace_id: Mapped[int] = mapped_column(Integer, ForeignKey("workspaces.id"), nullable=False, index=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    role: Mapped[str] = mapped_column(String(16), nullable=False, default="viewer")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
+
+
+class WorkspaceInvitation(Base):
+    __tablename__ = "workspace_invitations"
+    __table_args__ = (
+        UniqueConstraint("token_hash", name="uq_workspace_invitations_token_hash"),
+        CheckConstraint("role IN ('editor', 'viewer')", name="ck_workspace_invitations_role"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    workspace_id: Mapped[int] = mapped_column(Integer, ForeignKey("workspaces.id"), nullable=False, index=True)
+    email: Mapped[str] = mapped_column(String(320), nullable=False, index=True)
+    role: Mapped[str] = mapped_column(String(16), nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(128), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    invited_by_user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    accepted_by_user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_by_user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
+class AuditEvent(Base):
+    """Write-once security-relevant events; deliberately has no updated_at field."""
+
+    __tablename__ = "audit_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    actor_user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    workspace_id: Mapped[int] = mapped_column(Integer, ForeignKey("workspaces.id"), nullable=False, index=True)
+    connection_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("connections.id"), nullable=True, index=True)
+    action: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    target_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    target_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    outcome: Mapped[str] = mapped_column(String(32), nullable=False, default="success", index=True)
+    request_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow, index=True)
+
+
+class Connection(Base):
+    __tablename__ = "connections"
+    __table_args__ = (UniqueConstraint("workspace_id", "name", name="uq_connections_workspace_name"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    workspace_id: Mapped[int] = mapped_column(Integer, ForeignKey("workspaces.id"), nullable=False, index=True)
+    created_by_user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    name: Mapped[str] = mapped_column(String(120))
     kind: Mapped[str] = mapped_column(String(32), index=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     role_arn: Mapped[str | None] = mapped_column(String(255), nullable=True)

@@ -339,8 +339,6 @@ def build_accounts_response(session: Session, connection_id: int) -> dict:
                 "id": account.id,
                 "display_name": account.display_name,
                 "aws_account_id": account.aws_account_id,
-                "role_arn": account.role_arn,
-                "external_id": account.external_id,
                 "team_tag_key": account.team_tag_key,
                 "enabled": account.enabled,
                 "current_30d_cost": money(current_30),
@@ -756,8 +754,18 @@ def list_anomalies_response(session: Session, connection_id: int) -> dict:
     return {"connection_id": connection_id, "items": items}
 
 
-def list_connections_response(session: Session) -> dict:
-    connections = session.scalars(select(Connection).order_by(Connection.kind, Connection.name)).all()
+def list_connections_response(session: Session, workspace_id: int) -> dict:
+    """Return the safe connection-list projection for one authorized workspace.
+
+    Credential-adjacent configuration deliberately belongs to the editor-only
+    detail endpoint.  In particular, an external ID is never returned to the
+    browser once it has been saved.
+    """
+    connections = session.scalars(
+        select(Connection)
+        .where(Connection.workspace_id == workspace_id)
+        .order_by(Connection.kind, Connection.name)
+    ).all()
     items = []
     for connection in connections:
         last_sync = latest_connection_sync(session, connection.id)
@@ -775,13 +783,7 @@ def list_connections_response(session: Session) -> dict:
                 "name": connection.name,
                 "kind": connection.kind,
                 "enabled": connection.enabled,
-                "role_arn": connection.role_arn,
-                "external_id": connection.external_id,
-                "billing_view_arn": connection.billing_view_arn,
                 "billing_mode": connection.billing_mode,
-                "billing_export_bucket": connection.billing_export_bucket,
-                "billing_export_prefix": connection.billing_export_prefix,
-                "billing_export_region": connection.billing_export_region,
                 "billing_truth_mode": billing_truth_mode_for_connection(session, connection),
                 "team_tag_key": connection.team_tag_key,
                 "account_count": int(account_count),

@@ -20,11 +20,13 @@ from app.db.models import (
     SyncRun,
     Team,
     TeamAlias,
+    Workspace,
 )
 from app.services.billing import build_demo_billing_truth
 
 DEMO_CONNECTION_NAME = "Local Demo"
 DEMO_CONNECTION_KIND = "demo"
+DEMO_WORKSPACE_NAME = "Demo Workspace"
 DEFAULT_TEAM_TAG_KEY = "Team"
 
 DEFAULT_SERVICE_WEIGHTS = {
@@ -213,14 +215,41 @@ def build_profile(account: Account) -> dict:
     }
 
 
+def ensure_demo_workspace(session: Session) -> Workspace:
+    """Return the singleton system-owned workspace for synthetic demo data."""
+
+    workspace = session.execute(
+        select(Workspace).where(Workspace.is_demo.is_(True)).order_by(Workspace.id)
+    ).scalar_one_or_none()
+    if workspace:
+        return workspace
+
+    workspace = Workspace(name=DEMO_WORKSPACE_NAME, is_demo=True, created_by_user_id=None)
+    session.add(workspace)
+    session.flush()
+    return workspace
+
+
+def get_demo_workspace(session: Session) -> Workspace:
+    return ensure_demo_workspace(session)
+
+
 def ensure_demo_connection(session: Session) -> Connection:
+    demo_workspace = ensure_demo_workspace(session)
     connection = session.execute(
         select(Connection).where(Connection.kind == DEMO_CONNECTION_KIND).order_by(Connection.id)
     ).scalar_one_or_none()
     if connection:
+        if connection.workspace_id != demo_workspace.id:
+            connection.workspace_id = demo_workspace.id
+            connection.created_by_user_id = None
+            session.add(connection)
+            session.flush()
         return connection
 
     connection = Connection(
+        workspace_id=demo_workspace.id,
+        created_by_user_id=None,
         name=DEMO_CONNECTION_NAME,
         kind=DEMO_CONNECTION_KIND,
         enabled=True,

@@ -1,24 +1,27 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState, type Dispatch, type FormEvent, type SetStateAction } from "react";
 
 import { useConnection } from "@/components/connection-provider";
 import { ErrorState, LoadingState, PageHeader, Panel, StatusPill } from "@/components/ui";
-import { apiRequest, useApiData, withConnectionId } from "@/lib/api";
+import { apiRequest, useApiData } from "@/lib/api";
 import type {
-  AwsRuntimeResponse,
-  ConnectionItem,
+  AuditEventsResponse,
+  ConnectionConfigResponse,
   ConnectionValidationResponse,
   SyncResponse,
-  SyncRunsResponse
+  WorkspaceInviteResponse,
+  WorkspaceInvitesResponse,
+  WorkspaceMembersResponse
 } from "@/lib/types";
 
-type CreateFormState = {
+type ConnectionForm = {
   name: string;
   kind: "org_management" | "account_role";
   enabled: boolean;
   role_arn: string;
   external_id: string;
+  clear_external_id: boolean;
   billing_view_arn: string;
   billing_mode: "usage_only" | "payable_hybrid";
   billing_export_bucket: string;
@@ -29,12 +32,13 @@ type CreateFormState = {
   account_aws_account_id: string;
 };
 
-const initialCreateForm: CreateFormState = {
+const blankConnectionForm: ConnectionForm = {
   name: "",
   kind: "org_management",
   enabled: true,
   role_arn: "",
   external_id: "",
+  clear_external_id: false,
   billing_view_arn: "",
   billing_mode: "payable_hybrid",
   billing_export_bucket: "",
@@ -45,584 +49,299 @@ const initialCreateForm: CreateFormState = {
   account_aws_account_id: ""
 };
 
-function ConnectionEditor({
-  connection,
-  active,
-  onSaved,
-  onSynced
-}: {
-  connection: ConnectionItem;
-  active: boolean;
-  onSaved: () => void;
-  onSynced: () => void;
-}) {
-  const [form, setForm] = useState({
-    name: connection.name,
-    enabled: connection.enabled,
-    role_arn: connection.role_arn ?? "",
-    external_id: connection.external_id ?? "",
-    billing_view_arn: connection.billing_view_arn ?? "",
-    billing_mode: connection.billing_mode,
-    billing_export_bucket: connection.billing_export_bucket ?? "",
-    billing_export_prefix: connection.billing_export_prefix ?? "",
-    billing_export_region: connection.billing_export_region ?? "us-east-1",
-    team_tag_key: connection.team_tag_key,
-    account_display_name: connection.primary_account_name ?? "",
-    account_aws_account_id: ""
-  });
+function inputClassName() {
+  return "rounded-2xl border border-slate-200 bg-white/80 px-4 py-3 text-sm";
+}
+
+function toPatch(form: ConnectionForm) {
+  return {
+    name: form.name,
+    enabled: form.enabled,
+    role_arn: form.role_arn || null,
+    ...(form.external_id ? { external_id: form.external_id } : form.clear_external_id ? { external_id: null } : {}),
+    billing_view_arn: form.billing_view_arn || null,
+    billing_mode: form.billing_mode,
+    billing_export_bucket: form.billing_export_bucket || null,
+    billing_export_prefix: form.billing_export_prefix || null,
+    billing_export_region: form.billing_export_region || null,
+    team_tag_key: form.team_tag_key,
+    ...(form.kind === "account_role" && form.account_display_name && form.account_aws_account_id
+      ? { account: { display_name: form.account_display_name, aws_account_id: form.account_aws_account_id } }
+      : {})
+  };
+}
+
+export default function SettingsPage() {
+  const {
+    loading,
+    error,
+    selectedWorkspace,
+    selectedWorkspaceId,
+    selectedConnection,
+    selectedConnectionId,
+    canEditWorkspace,
+    isWorkspaceOwner,
+    refreshConnections,
+    refreshWorkspace
+  } = useConnection();
+  const config = useApiData<ConnectionConfigResponse>(
+    canEditWorkspace && selectedConnectionId ? `/connections/${selectedConnectionId}` : null
+  );
+  const members = useApiData<WorkspaceMembersResponse>(
+    isWorkspaceOwner && selectedWorkspaceId ? `/workspaces/${selectedWorkspaceId}/members` : null
+  );
+  const invites = useApiData<WorkspaceInvitesResponse>(
+    isWorkspaceOwner && selectedWorkspaceId ? `/workspaces/${selectedWorkspaceId}/invites` : null
+  );
+  const audit = useApiData<AuditEventsResponse>(
+    isWorkspaceOwner && selectedWorkspaceId ? `/workspaces/${selectedWorkspaceId}/audit-events` : null
+  );
+  const [editorForm, setEditorForm] = useState<ConnectionForm>(blankConnectionForm);
+  const [createForm, setCreateForm] = useState<ConnectionForm>(blankConnectionForm);
   const [message, setMessage] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [creating, setCreating] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [validating, setValidating] = useState(false);
   const [validation, setValidation] = useState<ConnectionValidationResponse | null>(null);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState<"editor" | "viewer">("viewer");
+  const [inviteUrl, setInviteUrl] = useState<string | null>(null);
+  const [inviting, setInviting] = useState(false);
 
   useEffect(() => {
-    setForm({
+    if (!config.data) return;
+    const connection = config.data.item;
+    setEditorForm({
       name: connection.name,
+      kind: connection.kind === "demo" ? "org_management" : connection.kind,
       enabled: connection.enabled,
       role_arn: connection.role_arn ?? "",
-      external_id: connection.external_id ?? "",
+      external_id: "",
+      clear_external_id: false,
       billing_view_arn: connection.billing_view_arn ?? "",
       billing_mode: connection.billing_mode,
       billing_export_bucket: connection.billing_export_bucket ?? "",
       billing_export_prefix: connection.billing_export_prefix ?? "",
       billing_export_region: connection.billing_export_region ?? "us-east-1",
       team_tag_key: connection.team_tag_key,
-      account_display_name: connection.primary_account_name ?? "",
+      account_display_name: "",
       account_aws_account_id: ""
     });
-    setValidation(null);
-  }, [
-    connection.billing_view_arn,
-    connection.enabled,
-    connection.external_id,
-    connection.billing_export_bucket,
-    connection.billing_export_prefix,
-    connection.billing_export_region,
-    connection.billing_mode,
-    connection.name,
-    connection.primary_account_name,
-    connection.role_arn,
-    connection.team_tag_key
-  ]);
+  }, [config.data]);
+
+  if (error) return <ErrorState message={error} />;
+  if (loading) return <LoadingState label="Resolving workspace permissions..." />;
+  if (!selectedWorkspace || !selectedWorkspaceId) return <ErrorState message="No authorized workspace is available." />;
 
   async function saveConnection() {
+    if (!selectedConnectionId) return;
     setSaving(true);
     setMessage(null);
     try {
-      await apiRequest(`/connections/${connection.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({
-          name: form.name,
-          enabled: form.enabled,
-          role_arn: form.role_arn || null,
-          external_id: form.external_id || null,
-          billing_view_arn: form.billing_view_arn || null,
-          billing_mode: form.billing_mode,
-          billing_export_bucket: form.billing_export_bucket || null,
-          billing_export_prefix: form.billing_export_prefix || null,
-          billing_export_region: form.billing_export_region || null,
-          team_tag_key: form.team_tag_key,
-          account:
-            connection.kind === "account_role" && form.account_display_name && form.account_aws_account_id
-              ? {
-                  display_name: form.account_display_name,
-                  aws_account_id: form.account_aws_account_id
-                }
-              : undefined
-        })
-      });
-      setMessage("Saved connection settings.");
-      onSaved();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Unable to save connection");
+      await apiRequest(`/connections/${selectedConnectionId}`, { method: "PATCH", body: JSON.stringify(toPatch(editorForm)) });
+      setMessage("Connection configuration saved. Sensitive external IDs remain write-only.");
+      setEditorForm((current) => ({ ...current, external_id: "", clear_external_id: false }));
+      config.refresh();
+      refreshConnections();
+    } catch (nextError) {
+      setMessage(nextError instanceof Error ? nextError.message : "Unable to save connection configuration");
     } finally {
       setSaving(false);
     }
   }
 
-  async function syncConnection() {
-    setSyncing(true);
-    setMessage(null);
-    try {
-      const result = await apiRequest<SyncResponse>(`/connections/${connection.id}/sync`, {
-        method: "POST"
-      });
-      setMessage(
-        result.message
-          ? `Sync finished with ${result.status}: ${result.message}`
-          : `Synced ${result.accounts_synced} accounts across ${result.window_days} days.`
-      );
-      onSynced();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Unable to sync connection");
-    } finally {
-      setSyncing(false);
-    }
-  }
-
-  async function validateConnection() {
-    setValidating(true);
-    setMessage(null);
-    try {
-      const result = await apiRequest<ConnectionValidationResponse>(`/connections/${connection.id}/validate`, {
-        method: "POST"
-      });
-      setValidation(result);
-      setMessage(result.message);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Unable to validate connection");
-      setValidation(null);
-    } finally {
-      setValidating(false);
-    }
-  }
-
-  return (
-    <div className={`rounded-[24px] border p-5 ${active ? "border-slate-900 bg-white" : "border-slate-200/70 bg-white/75"}`}>
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="font-semibold text-slate-900">{connection.name}</p>
-          <p className="mt-1 text-sm text-slate-500">{connection.kind}</p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <StatusPill label={connection.enabled ? "enabled" : "disabled"} />
-          <StatusPill label={connection.billing_truth_mode} />
-          {active ? <StatusPill label="active" /> : null}
-        </div>
-      </div>
-
-      <div className="mt-4 grid gap-3">
-        <input
-          value={form.name}
-          onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
-          className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-3 text-sm"
-          placeholder="Connection name"
-        />
-        <div className="grid gap-3 md:grid-cols-2">
-          <input
-            value={form.role_arn}
-            onChange={(event) => setForm((current) => ({ ...current, role_arn: event.target.value }))}
-            className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-3 text-sm"
-            placeholder="Role ARN"
-          />
-          <input
-            value={form.external_id}
-            onChange={(event) => setForm((current) => ({ ...current, external_id: event.target.value }))}
-            className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-3 text-sm"
-            placeholder="External ID"
-          />
-        </div>
-        <div className="grid gap-3 md:grid-cols-2">
-          <select
-            value={form.billing_mode}
-            onChange={(event) => setForm((current) => ({ ...current, billing_mode: event.target.value as CreateFormState["billing_mode"] }))}
-            className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-3 text-sm"
-          >
-            <option value="payable_hybrid">Payable hybrid</option>
-            <option value="usage_only">Usage-only fallback</option>
-          </select>
-          <input
-            value={form.billing_view_arn}
-            onChange={(event) => setForm((current) => ({ ...current, billing_view_arn: event.target.value }))}
-            className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-3 text-sm"
-            placeholder="Billing View ARN"
-          />
-          <input
-            value={form.team_tag_key}
-            onChange={(event) => setForm((current) => ({ ...current, team_tag_key: event.target.value }))}
-            className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-3 text-sm"
-            placeholder="Team Tag Key"
-          />
-        </div>
-        <div className="grid gap-3 md:grid-cols-3">
-          <input
-            value={form.billing_export_bucket}
-            onChange={(event) => setForm((current) => ({ ...current, billing_export_bucket: event.target.value }))}
-            className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-3 text-sm"
-            placeholder="Billing export bucket"
-          />
-          <input
-            value={form.billing_export_prefix}
-            onChange={(event) => setForm((current) => ({ ...current, billing_export_prefix: event.target.value }))}
-            className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-3 text-sm"
-            placeholder="Billing export prefix"
-          />
-          <input
-            value={form.billing_export_region}
-            onChange={(event) => setForm((current) => ({ ...current, billing_export_region: event.target.value }))}
-            className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-3 text-sm"
-            placeholder="Billing export region"
-          />
-        </div>
-        {connection.kind === "account_role" ? (
-          <div className="grid gap-3 md:grid-cols-2">
-            <input
-              value={form.account_display_name}
-              onChange={(event) => setForm((current) => ({ ...current, account_display_name: event.target.value }))}
-              className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-3 text-sm"
-              placeholder="Primary account display name"
-            />
-            <input
-              value={form.account_aws_account_id}
-              onChange={(event) => setForm((current) => ({ ...current, account_aws_account_id: event.target.value }))}
-              className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-3 text-sm"
-              placeholder="Primary account AWS ID"
-            />
-          </div>
-        ) : null}
-        <label className="flex items-center gap-3 text-sm text-slate-600">
-          <input
-            type="checkbox"
-            checked={form.enabled}
-            onChange={(event) => setForm((current) => ({ ...current, enabled: event.target.checked }))}
-          />
-          Enabled
-        </label>
-      </div>
-
-      <div className="mt-4 flex flex-wrap gap-3">
-        <button
-          onClick={saveConnection}
-          disabled={saving}
-          className="rounded-full bg-blue-700 px-4 py-2 text-sm text-white transition hover:bg-blue-600 disabled:bg-blue-300"
-        >
-          {saving ? "Saving..." : "Save"}
-        </button>
-        <button
-          onClick={syncConnection}
-          disabled={syncing}
-          className="rounded-full bg-slate-900 px-4 py-2 text-sm text-white transition hover:bg-slate-700 disabled:bg-slate-400"
-        >
-          {syncing ? "Syncing..." : "Sync"}
-        </button>
-        {connection.kind !== "demo" ? (
-          <button
-            onClick={validateConnection}
-            disabled={validating}
-            className="rounded-full border border-slate-300 bg-white px-4 py-2 text-sm text-slate-700 transition hover:border-slate-500 disabled:text-slate-400"
-          >
-            {validating ? "Validating..." : "Validate Access"}
-          </button>
-        ) : null}
-      </div>
-
-      <div className="mt-4 flex flex-wrap gap-2 text-xs uppercase tracking-[0.18em] text-slate-500">
-        <span>{connection.account_count} accounts</span>
-        {connection.primary_account_name ? <span>{connection.primary_account_name}</span> : null}
-      </div>
-      {validation ? (
-        <div className="mt-4 space-y-3 rounded-[20px] border border-slate-200/70 bg-slate-50 p-4 text-sm text-slate-600">
-          <div className="flex items-center justify-between gap-3">
-            <p className="font-semibold text-slate-900">Access validation</p>
-            <div className="flex flex-wrap gap-2">
-              <StatusPill label={validation.status} />
-              <StatusPill label={validation.truth_mode} />
-            </div>
-          </div>
-          <p>{validation.message}</p>
-          {validation.identity ? (
-            <div className="space-y-1 text-xs uppercase tracking-[0.18em] text-slate-500">
-              <p>{validation.identity.account_id}</p>
-              <p className="break-all normal-case tracking-normal text-slate-600">{validation.identity.arn}</p>
-            </div>
-          ) : null}
-          <div className="space-y-2">
-            {validation.checks.map((check) => (
-              <div key={check.code} className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
-                <div className="flex items-center justify-between gap-3">
-                  <p className="font-medium text-slate-900">{check.code}</p>
-                  <StatusPill label={check.status} />
-                </div>
-                <p className="mt-2 text-sm text-slate-600">{check.message}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      ) : null}
-      {message ? <p className="mt-3 text-sm text-slate-600">{message}</p> : null}
-    </div>
-  );
-}
-
-export default function SettingsPage() {
-  const {
-    loading: connectionLoading,
-    error: connectionError,
-    connections,
-    selectedConnection,
-    selectedConnectionId,
-    refreshConnections
-  } = useConnection();
-  const syncRuns = useApiData<SyncRunsResponse>(selectedConnectionId ? withConnectionId("/sync-runs", selectedConnectionId) : null);
-  const awsRuntime = useApiData<AwsRuntimeResponse>("/aws/runtime");
-  const [form, setForm] = useState<CreateFormState>(initialCreateForm);
-  const [message, setMessage] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-
-  async function createConnection(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setSubmitting(true);
+  async function createConnection() {
+    setCreating(true);
     setMessage(null);
     try {
       await apiRequest("/connections", {
         method: "POST",
         body: JSON.stringify({
-          name: form.name,
-          kind: form.kind,
-          enabled: form.enabled,
-          role_arn: form.role_arn || null,
-          external_id: form.external_id || null,
-          billing_view_arn: form.billing_view_arn || null,
-          billing_mode: form.billing_mode,
-          billing_export_bucket: form.billing_export_bucket || null,
-          billing_export_prefix: form.billing_export_prefix || null,
-          billing_export_region: form.billing_export_region || null,
-          team_tag_key: form.team_tag_key,
-          account:
-            form.kind === "account_role"
-              ? {
-                  display_name: form.account_display_name,
-                  aws_account_id: form.account_aws_account_id
-                }
-              : undefined
+          ...toPatch(createForm),
+          workspace_id: selectedWorkspaceId,
+          kind: createForm.kind,
+          external_id: createForm.external_id || null
         })
       });
-      setForm(initialCreateForm);
-      setMessage("Connection created.");
+      setCreateForm(blankConnectionForm);
+      setMessage("Connection created in this workspace.");
       refreshConnections();
-      syncRuns.refresh();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Unable to create connection");
+    } catch (nextError) {
+      setMessage(nextError instanceof Error ? nextError.message : "Unable to create connection");
     } finally {
-      setSubmitting(false);
+      setCreating(false);
     }
   }
 
-  const sortedConnections = useMemo(
-    () => [...connections].sort((left, right) => Number(right.id === selectedConnectionId) - Number(left.id === selectedConnectionId) || left.name.localeCompare(right.name)),
-    [connections, selectedConnectionId]
-  );
-
-  if (connectionLoading) {
-    return <LoadingState label="Loading connection settings..." />;
+  async function validateConnection() {
+    if (!selectedConnectionId) return;
+    setValidating(true);
+    setMessage(null);
+    try {
+      const result = await apiRequest<ConnectionValidationResponse>(`/connections/${selectedConnectionId}/validate`, { method: "POST" });
+      setValidation(result);
+      setMessage(result.message);
+    } catch (nextError) {
+      setValidation(null);
+      setMessage(nextError instanceof Error ? nextError.message : "Unable to validate connection");
+    } finally {
+      setValidating(false);
+    }
   }
 
-  if (connectionError) {
-    return <ErrorState message={connectionError} />;
+  async function syncConnection() {
+    if (!selectedConnectionId) return;
+    setSyncing(true);
+    setMessage(null);
+    try {
+      const result = await apiRequest<SyncResponse>(`/connections/${selectedConnectionId}/sync`, { method: "POST" });
+      setMessage(result.message ?? `Synced ${result.accounts_synced} accounts across ${result.window_days} days.`);
+      refreshConnections();
+    } catch (nextError) {
+      setMessage(nextError instanceof Error ? nextError.message : "Unable to sync connection");
+    } finally {
+      setSyncing(false);
+    }
   }
+
+  async function createInvite(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setInviting(true);
+    try {
+      const result = await apiRequest<WorkspaceInviteResponse>(`/workspaces/${selectedWorkspaceId}/invites`, {
+        method: "POST",
+        body: JSON.stringify({ email: inviteEmail, role: inviteRole })
+      });
+      setInviteUrl(result.item.invite_url);
+      setInviteEmail("");
+      members.refresh();
+      invites.refresh();
+      audit.refresh();
+    } catch (nextError) {
+      setMessage(nextError instanceof Error ? nextError.message : "Unable to create invite");
+    } finally {
+      setInviting(false);
+    }
+  }
+
+  async function changeMemberRole(userId: number, role: "editor" | "viewer") {
+    try {
+      await apiRequest(`/workspaces/${selectedWorkspaceId}/members/${userId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ role })
+      });
+      members.refresh();
+      audit.refresh();
+    } catch (nextError) {
+      setMessage(nextError instanceof Error ? nextError.message : "Unable to update workspace member");
+    }
+  }
+
+  async function removeMember(userId: number) {
+    try {
+      await apiRequest(`/workspaces/${selectedWorkspaceId}/members/${userId}`, { method: "DELETE" });
+      members.refresh();
+      audit.refresh();
+    } catch (nextError) {
+      setMessage(nextError instanceof Error ? nextError.message : "Unable to remove workspace member");
+    }
+  }
+
+  async function revokeInvite(invitationId: number) {
+    try {
+      await apiRequest(`/workspaces/${selectedWorkspaceId}/invites/${invitationId}`, { method: "DELETE" });
+      setInviteUrl(null);
+      invites.refresh();
+      audit.refresh();
+    } catch (nextError) {
+      setMessage(nextError instanceof Error ? nextError.message : "Unable to revoke workspace invite");
+    }
+  }
+
+  const readOnly = !canEditWorkspace || selectedWorkspace.read_only;
+  const externalConfigured = config.data?.item.external_id_configured;
 
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow="Settings"
-        title="Connection-scoped ingestion controls."
-        description="Create and manage demo, organization, and standalone account connections without blending datasets together."
+        eyebrow="Workspace Settings"
+        title={selectedWorkspace.name}
+        description="Workspace access is enforced by the API. Editors manage connections; only the owner manages sharing and audit history."
       />
 
+      <div className="glass-panel flex flex-wrap items-center gap-3 rounded-[24px] px-5 py-4 text-sm text-slate-700">
+        <StatusPill label={selectedWorkspace.role} />
+        <StatusPill label={selectedWorkspace.read_only ? "read-only demo" : "private workspace"} />
+        <span>{readOnly ? "You can view analytics, but cannot change this workspace." : "You can manage connections in this workspace."}</span>
+      </div>
       {message ? <div className="glass-panel rounded-[24px] px-5 py-4 text-sm text-slate-700">{message}</div> : null}
 
-      <div className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
-        <Panel title="Create connection" subtitle="Org-management and standalone account-role connections share one scoped model.">
-          <form className="grid gap-4" onSubmit={createConnection}>
-            <input
-              value={form.name}
-              onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
-              placeholder="Connection name"
-              className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-3"
-              required
-            />
-            <select
-              value={form.kind}
-              onChange={(event) => setForm((current) => ({ ...current, kind: event.target.value as CreateFormState["kind"] }))}
-              className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-3"
-            >
-              <option value="org_management">Organization management</option>
-              <option value="account_role">Standalone account role</option>
-            </select>
-            <input
-              value={form.role_arn}
-              onChange={(event) => setForm((current) => ({ ...current, role_arn: event.target.value }))}
-              placeholder={form.kind === "account_role" ? "Role ARN (required)" : "Role ARN (optional)"}
-              className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-3"
-            />
-            <div className="grid gap-4 md:grid-cols-2">
-              <input
-                value={form.external_id}
-                onChange={(event) => setForm((current) => ({ ...current, external_id: event.target.value }))}
-                placeholder="External ID"
-                className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-3"
-              />
-              <select
-                value={form.billing_mode}
-                onChange={(event) => setForm((current) => ({ ...current, billing_mode: event.target.value as CreateFormState["billing_mode"] }))}
-                className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-3"
-              >
-                <option value="payable_hybrid">Payable hybrid</option>
-                <option value="usage_only">Usage-only fallback</option>
-              </select>
-            </div>
-            <div className="grid gap-4 md:grid-cols-2">
-              <input
-                value={form.team_tag_key}
-                onChange={(event) => setForm((current) => ({ ...current, team_tag_key: event.target.value }))}
-                placeholder="Team Tag Key"
-                className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-3"
-              />
-              <input
-                value={form.billing_view_arn}
-                onChange={(event) => setForm((current) => ({ ...current, billing_view_arn: event.target.value }))}
-                placeholder="Billing View ARN"
-                className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-3"
-              />
-            </div>
-            <div className="grid gap-4 md:grid-cols-3">
-              <input
-                value={form.billing_export_bucket}
-                onChange={(event) => setForm((current) => ({ ...current, billing_export_bucket: event.target.value }))}
-                placeholder="Billing export bucket"
-                className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-3"
-              />
-              <input
-                value={form.billing_export_prefix}
-                onChange={(event) => setForm((current) => ({ ...current, billing_export_prefix: event.target.value }))}
-                placeholder="Billing export prefix"
-                className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-3"
-              />
-              <input
-                value={form.billing_export_region}
-                onChange={(event) => setForm((current) => ({ ...current, billing_export_region: event.target.value }))}
-                placeholder="Billing export region"
-                className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-3"
-              />
-            </div>
-            {form.kind === "account_role" ? (
-              <div className="grid gap-4 md:grid-cols-2">
-                <input
-                  value={form.account_display_name}
-                  onChange={(event) => setForm((current) => ({ ...current, account_display_name: event.target.value }))}
-                  placeholder="Primary account display name"
-                  className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-3"
-                  required
-                />
-                <input
-                  value={form.account_aws_account_id}
-                  onChange={(event) => setForm((current) => ({ ...current, account_aws_account_id: event.target.value }))}
-                  placeholder="12-digit AWS account id"
-                  className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-3"
-                  required
-                />
-              </div>
-            ) : null}
-            <label className="flex items-center gap-3 text-sm text-slate-600">
-              <input
-                type="checkbox"
-                checked={form.enabled}
-                onChange={(event) => setForm((current) => ({ ...current, enabled: event.target.checked }))}
-              />
-              Enabled
-            </label>
-            <button
-              type="submit"
-              disabled={submitting}
-              className="rounded-full bg-blue-700 px-5 py-3 text-sm font-medium text-white transition hover:bg-blue-600 disabled:bg-blue-300"
-            >
-              {submitting ? "Creating..." : "Create Connection"}
+      {canEditWorkspace && !selectedWorkspace.read_only ? (
+        <div className="grid gap-6 xl:grid-cols-2">
+          <Panel title="Create connection" subtitle="The connection is owned by this workspace; AWS credentials never enter browser storage.">
+            <ConnectionFormFields form={createForm} setForm={setCreateForm} includeKind />
+            <button onClick={createConnection} disabled={creating} className="mt-4 rounded-full bg-blue-700 px-5 py-3 text-sm font-medium text-white disabled:bg-blue-300">
+              {creating ? "Creating..." : "Create connection"}
             </button>
-          </form>
-        </Panel>
+          </Panel>
 
-        <Panel title="AWS runtime" subtitle="The API uses ambient AWS credentials plus optional role assumption. No access keys are stored in the app database.">
-          {awsRuntime.loading ? (
-            <LoadingState label="Inspecting AWS runtime..." />
-          ) : awsRuntime.error || !awsRuntime.data ? (
-            <ErrorState message={awsRuntime.error ?? "Unable to inspect AWS runtime."} />
-          ) : (
-            <div className="space-y-4 rounded-[24px] bg-slate-900 p-5 text-sm leading-7 text-slate-200">
-              <div className="flex items-center justify-between gap-3">
-                <p className="font-semibold text-white">Runtime status</p>
-                <StatusPill label={awsRuntime.data.status} />
-              </div>
-              <p>{awsRuntime.data.message}</p>
-              <div className="space-y-1 text-slate-300">
-                <p><strong>Credential Source:</strong> {awsRuntime.data.credential_source ?? "none detected"}</p>
-                <p><strong>Profile:</strong> {awsRuntime.data.profile ?? "default resolution"}</p>
-                <p><strong>Region:</strong> {awsRuntime.data.region}</p>
-                {awsRuntime.data.caller ? <p><strong>Caller Account:</strong> {awsRuntime.data.caller.account_id}</p> : null}
-                {awsRuntime.data.caller ? <p className="break-all"><strong>Caller ARN:</strong> {awsRuntime.data.caller.arn}</p> : null}
-              </div>
-              <div className="space-y-2 text-slate-300">
-                <p>1. Real AWS syncs require the API runtime to see credentials before any connection can assume a role.</p>
-                <p>2. Prefer mounting a read-only AWS config directory or short-lived environment credentials into the API container.</p>
-                <p>3. Keep `external_id` in the connection if your trust policy requires it, but do not paste access keys into the UI.</p>
-              </div>
-              <button
-                onClick={awsRuntime.refresh}
-                className="rounded-full border border-slate-600 px-4 py-2 text-sm text-white transition hover:border-slate-300"
-              >
-                Refresh Runtime Status
-              </button>
-            </div>
-          )}
-        </Panel>
-      </div>
-
-      <Panel title="Guidance" subtitle="Operational rules that keep the scoped model honest and keep credentials out of application state.">
-        <div className="space-y-3 rounded-[24px] bg-white/75 p-5 text-sm leading-7 text-slate-700">
-          <p>1. Organization sync uses one Cost Explorer view and imports linked accounts into the selected connection.</p>
-          <p>2. Standalone account-role sync requires one primary account membership plus a role ARN.</p>
-          <p>3. Payable hybrid mode reads AWS Data Exports parquet files for exact billed actuals and falls back to approximate Cost Explorer net values when exports are missing or stale.</p>
-          <p>4. Team analytics depend on an activated cost allocation tag key; blank values fall back to Unallocated.</p>
-          <p>5. Connections stay separate by design, so totals from organization and standalone scopes are never implicitly merged.</p>
-          <p>6. The app never asks for or stores AWS access keys. It relies on ambient runtime credentials, optional role assumption, and read-only export access.</p>
-        </div>
-      </Panel>
-
-      <Panel title="Managed connections" subtitle="Edit, enable, and sync each scoped collector independently.">
-        <div className="grid gap-4">
-          {sortedConnections.map((connection) => (
-            <ConnectionEditor
-              key={connection.id}
-              connection={connection}
-              active={connection.id === selectedConnectionId}
-              onSaved={() => {
-                refreshConnections();
-                syncRuns.refresh();
-              }}
-              onSynced={() => {
-                refreshConnections();
-                syncRuns.refresh();
-              }}
-            />
-          ))}
-        </div>
-      </Panel>
-
-      <Panel title="Recent sync runs" subtitle={selectedConnection ? `${selectedConnection.name} run history` : "Select a connection to inspect recent runs."}>
-        {syncRuns.loading ? (
-          <LoadingState label="Loading sync history..." />
-        ) : syncRuns.error || !syncRuns.data ? (
-          <ErrorState message={syncRuns.error ?? "Unable to load sync history."} />
-        ) : (
-          <div className="space-y-3">
-            {syncRuns.data.items.map((run) => (
-              <div key={run.id} className="rounded-[24px] border border-slate-200/70 bg-white/75 p-5">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="font-semibold text-slate-900">{run.kind}</p>
-                    <p className="text-sm text-slate-500">{run.finished_at ?? run.started_at ?? "No timestamp"}</p>
-                  </div>
-                  <StatusPill label={run.status} />
+          <Panel title={selectedConnection ? `Manage ${selectedConnection.name}` : "Manage connection"} subtitle="Configuration is available to editors and owners only. External IDs are write-only.">
+            {!selectedConnectionId ? <p className="text-sm text-slate-500">Create or select a connection first.</p> : config.loading ? <LoadingState label="Loading protected configuration..." /> : config.error || !config.data ? <ErrorState message={config.error ?? "Unable to load connection configuration."} /> : selectedConnection?.kind === "demo" ? <p className="text-sm text-slate-600">The shared demo connection is intentionally read-only.</p> : (
+              <>
+                <ConnectionFormFields form={editorForm} setForm={setEditorForm} includeKind={false} externalConfigured={externalConfigured} />
+                <div className="mt-4 flex flex-wrap gap-3">
+                  <button onClick={saveConnection} disabled={saving} className="rounded-full bg-blue-700 px-5 py-3 text-sm font-medium text-white disabled:bg-blue-300">{saving ? "Saving..." : "Save configuration"}</button>
+                  <button onClick={validateConnection} disabled={validating} className="rounded-full border border-slate-300 px-5 py-3 text-sm">{validating ? "Validating..." : "Validate access"}</button>
+                  <button onClick={syncConnection} disabled={syncing} className="rounded-full bg-slate-900 px-5 py-3 text-sm text-white disabled:bg-slate-400">{syncing ? "Syncing..." : "Run sync"}</button>
                 </div>
-                <p className="mt-3 text-sm text-slate-600">
-                  {run.accounts_synced} account{run.accounts_synced === 1 ? "" : "s"} synced, {run.records_written} records written, {run.window_days}-day window.
-                </p>
-                {run.message ? <p className="mt-2 text-sm text-slate-500">{run.message}</p> : null}
-              </div>
-            ))}
-          </div>
-        )}
-      </Panel>
+                {validation ? <div className="mt-4 rounded-2xl bg-slate-50 p-4 text-sm text-slate-600"><StatusPill label={validation.status} /> <span className="ml-2">{validation.message}</span></div> : null}
+              </>
+            )}
+          </Panel>
+        </div>
+      ) : null}
+
+      {isWorkspaceOwner ? (
+        <div className="grid gap-6 xl:grid-cols-2">
+          <Panel title="Workspace members" subtitle="Share a time-limited, email-bound invite link. Email delivery through SES is intentionally deferred.">
+            <form onSubmit={createInvite} className="flex flex-wrap gap-3">
+              <input value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value)} type="email" required placeholder="teammate@example.com" className="min-w-[220px] flex-1 rounded-2xl border border-slate-200 px-4 py-3 text-sm" />
+              <select value={inviteRole} onChange={(event) => setInviteRole(event.target.value as "editor" | "viewer")} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm"><option value="viewer">Viewer</option><option value="editor">Editor</option></select>
+              <button disabled={inviting} className="rounded-full bg-slate-900 px-5 py-3 text-sm text-white disabled:bg-slate-400">{inviting ? "Creating..." : "Create invite"}</button>
+            </form>
+            {inviteUrl ? <div className="mt-4 space-y-2 rounded-2xl bg-slate-50 p-4"><p className="text-sm font-medium">Copy and share this link once:</p><input readOnly value={inviteUrl} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs" /><button onClick={() => navigator.clipboard?.writeText(inviteUrl)} className="text-sm font-medium text-blue-700">Copy link</button></div> : null}
+            {members.loading ? <LoadingState label="Loading members..." /> : members.error ? <ErrorState message={members.error} /> : <div className="mt-5 space-y-3">{members.data?.items.map((member) => <div key={member.user_id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 p-4 text-sm"><div><p className="font-medium">{member.display_name}</p><p className="text-slate-500">{member.email}</p></div>{member.role === "owner" ? <StatusPill label="owner" /> : <div className="flex items-center gap-2"><select value={member.role} onChange={(event) => changeMemberRole(member.user_id, event.target.value as "editor" | "viewer")} className="rounded-xl border border-slate-200 px-3 py-2"><option value="viewer">Viewer</option><option value="editor">Editor</option></select><button onClick={() => removeMember(member.user_id)} className="text-sm text-rose-700">Remove</button></div>}</div>)}</div>}
+            <div className="mt-5 border-t border-slate-200 pt-5">
+              <p className="text-sm font-medium text-slate-800">Invite lifecycle</p>
+              {invites.loading ? <LoadingState label="Loading invitations..." /> : invites.error ? <ErrorState message={invites.error} /> : <div className="mt-3 space-y-2">{invites.data?.items.length ? invites.data.items.map((invite) => <div key={invite.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-slate-50 p-3 text-sm"><div><p className="font-medium">{invite.email}</p><p className="text-xs text-slate-500">{invite.role} · expires {new Date(invite.expires_at).toLocaleString()}</p></div><div className="flex items-center gap-2"><StatusPill label={invite.status} />{invite.status === "pending" ? <button onClick={() => revokeInvite(invite.id)} className="text-sm text-rose-700">Revoke</button> : null}</div></div>) : <p className="text-sm text-slate-500">No invitations yet.</p>}</div>}
+            </div>
+          </Panel>
+
+          <Panel title="Audit history" subtitle="Append-only application events for this workspace. Sensitive values are redacted before storage.">
+            {audit.loading ? <LoadingState label="Loading audit history..." /> : audit.error ? <ErrorState message={audit.error} /> : <div className="space-y-3">{audit.data?.items.map((event) => <div key={event.id} className="rounded-2xl border border-slate-200 p-4 text-sm"><div className="flex items-center justify-between gap-3"><div><p className="font-medium">{event.action}</p><p className="text-xs text-slate-500">{new Date(event.created_at).toLocaleString()} {event.actor_name ? `· ${event.actor_name}` : "· system"}</p></div><StatusPill label={event.outcome} /></div>{Object.keys(event.metadata).length ? <pre className="mt-3 overflow-x-auto rounded-xl bg-slate-50 p-3 text-xs text-slate-600">{JSON.stringify(event.metadata, null, 2)}</pre> : null}</div>) ?? <p className="text-sm text-slate-500">No events yet.</p>}</div>}
+          </Panel>
+        </div>
+      ) : null}
+
+      {selectedWorkspace.read_only ? <Panel title="Demo access" subtitle="The seeded demo is shared after sign-in so it remains safe for a public portfolio."><p className="text-sm leading-7 text-slate-600">Create a private workspace connection to validate AWS access, run syncs, or share a cost view with teammates.</p></Panel> : null}
+    </div>
+  );
+}
+
+function ConnectionFormFields({ form, setForm, includeKind, externalConfigured = false }: { form: ConnectionForm; setForm: Dispatch<SetStateAction<ConnectionForm>>; includeKind: boolean; externalConfigured?: boolean }) {
+  const set = <Key extends keyof ConnectionForm>(key: Key, value: ConnectionForm[Key]) => setForm((current) => ({ ...current, [key]: value }));
+  return (
+    <div className="grid gap-3">
+      <input value={form.name} onChange={(event) => set("name", event.target.value)} placeholder="Connection name" className={inputClassName()} required />
+      {includeKind ? <select value={form.kind} onChange={(event) => set("kind", event.target.value as ConnectionForm["kind"])} className={inputClassName()}><option value="org_management">Organization management</option><option value="account_role">Standalone account role</option></select> : null}
+      <div className="grid gap-3 md:grid-cols-2"><input value={form.role_arn} onChange={(event) => set("role_arn", event.target.value)} placeholder="Role ARN" className={inputClassName()} /><input value={form.external_id} onChange={(event) => set("external_id", event.target.value)} placeholder={externalConfigured ? "Replace configured external ID" : "External ID (optional)"} className={inputClassName()} /></div>
+      {externalConfigured ? <label className="flex items-center gap-2 text-xs text-slate-600"><input type="checkbox" checked={form.clear_external_id} onChange={(event) => set("clear_external_id", event.target.checked)} /> Clear the existing external ID</label> : null}
+      <div className="grid gap-3 md:grid-cols-2"><select value={form.billing_mode} onChange={(event) => set("billing_mode", event.target.value as ConnectionForm["billing_mode"])} className={inputClassName()}><option value="payable_hybrid">Payable hybrid</option><option value="usage_only">Usage-only fallback</option></select><input value={form.billing_view_arn} onChange={(event) => set("billing_view_arn", event.target.value)} placeholder="Billing View ARN" className={inputClassName()} /></div>
+      <div className="grid gap-3 md:grid-cols-3"><input value={form.billing_export_bucket} onChange={(event) => set("billing_export_bucket", event.target.value)} placeholder="Billing export bucket" className={inputClassName()} /><input value={form.billing_export_prefix} onChange={(event) => set("billing_export_prefix", event.target.value)} placeholder="Billing export prefix" className={inputClassName()} /><input value={form.billing_export_region} onChange={(event) => set("billing_export_region", event.target.value)} placeholder="Export region" className={inputClassName()} /></div>
+      <input value={form.team_tag_key} onChange={(event) => set("team_tag_key", event.target.value)} placeholder="Team tag key" className={inputClassName()} />
+      {form.kind === "account_role" ? <div className="grid gap-3 md:grid-cols-2"><input value={form.account_display_name} onChange={(event) => set("account_display_name", event.target.value)} placeholder="Primary account display name" className={inputClassName()} /><input value={form.account_aws_account_id} onChange={(event) => set("account_aws_account_id", event.target.value)} placeholder="12-digit primary AWS account ID" className={inputClassName()} /></div> : null}
+      <label className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={form.enabled} onChange={(event) => set("enabled", event.target.checked)} /> Enabled</label>
     </div>
   );
 }

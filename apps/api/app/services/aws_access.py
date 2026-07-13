@@ -92,7 +92,10 @@ def describe_aws_error(error: Exception, action: str | None = None) -> str:
             "from the API runtime."
         )
 
-    return str(error)
+    # Provider exception strings can echo request parameters. In particular,
+    # never let an unknown SDK/runtime error reflect a connection's external
+    # ID (or other credential material) into an API response or sync history.
+    return f"AWS could not complete the request{action_suffix}. Check the connection permissions and retry."
 
 
 def get_boto3_session():
