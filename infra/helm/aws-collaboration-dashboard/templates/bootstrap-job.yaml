@@ -1,0 +1,87 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "aws-collaboration-dashboard.bootstrapJobName" . }}
+  labels:
+    {{- include "aws-collaboration-dashboard.labels" . | nindent 4 }}
+    app.kubernetes.io/component: bootstrap
+spec:
+  backoffLimit: {{ .Values.bootstrap.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.bootstrap.activeDeadlineSeconds }}
+  ttlSecondsAfterFinished: {{ .Values.bootstrap.ttlSecondsAfterFinished }}
+  template:
+    metadata:
+      labels:
+        {{- include "aws-collaboration-dashboard.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: bootstrap
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+      initContainers:
+        - name: wait-for-postgres
+          image: {{ printf "%s:%s" .Values.postgres.image.repository .Values.postgres.image.tag | quote }}
+          imagePullPolicy: {{ .Values.postgres.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          env:
+            - name: PGHOST
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "aws-collaboration-dashboard.configMapName" . }}
+                  key: POSTGRES_HOST
+            - name: PGPORT
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "aws-collaboration-dashboard.configMapName" . }}
+                  key: POSTGRES_PORT
+            - name: PGUSER
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "aws-collaboration-dashboard.configMapName" . }}
+                  key: POSTGRES_USER
+            - name: PGDATABASE
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "aws-collaboration-dashboard.configMapName" . }}
+                  key: POSTGRES_DB
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "aws-collaboration-dashboard.databaseSecretName" . }}
+                  key: POSTGRES_PASSWORD
+          command:
+            - sh
+            - -ec
+            - >-
+              until pg_isready -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDATABASE";
+              do echo "waiting for PostgreSQL"; sleep 2; done
+      containers:
+        - name: bootstrap
+          image: {{ printf "%s:%s" .Values.image.api.repository .Values.image.api.tag | quote }}
+          imagePullPolicy: {{ .Values.image.api.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.api.containerSecurityContext | nindent 12 }}
+          command:
+            - python
+            - -m
+            - app.db.init_db
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "aws-collaboration-dashboard.databaseSecretName" . }}
+                  key: DATABASE_URL
+            - name: SEED_DAYS
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "aws-collaboration-dashboard.configMapName" . }}
+                  key: SEED_DAYS
+          resources:
+            {{- toYaml .Values.api.resources | nindent 12 }}

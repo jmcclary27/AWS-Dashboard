@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import type { ReactNode } from "react";
+import { Suspense, type ReactNode } from "react";
 
 import { AppFrame } from "@/components/app-frame";
 import { ConnectionProvider } from "@/components/connection-provider";
@@ -15,9 +15,11 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
   return (
     <html lang="en">
       <body>
-        <ConnectionProvider>
-          <AppFrame>{children}</AppFrame>
-        </ConnectionProvider>
+        <Suspense fallback={<div className="page-loading">Loading dashboard…</div>}>
+          <ConnectionProvider>
+            <AppFrame>{children}</AppFrame>
+          </ConnectionProvider>
+        </Suspense>
       </body>
     </html>
   );

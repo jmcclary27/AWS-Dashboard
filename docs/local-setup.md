@@ -44,3 +44,7 @@ The initial boot seeds 90 days of synthetic cost data into the built-in demo con
 - The settings page is the primary UI for creating org-management and standalone account-role connections.
 - The dashboard now prefers payable bill truth for month-to-date and projected month-end totals, while services, trends, anomalies, and recommendations stay on the usage analytics layer.
 - Demo sync continues to refresh a rolling 14-day window so local work stays near-zero cost even before AWS credentials are configured.
+
+## Local Kubernetes path
+
+For the Helm and k3d deployment path, including image import, ingress, bootstrap migrations, AWS Secret handling, and the manual smoke test, see [Local Kubernetes deployment](kubernetes-local.md).

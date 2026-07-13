@@ -2,13 +2,9 @@
 
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { Space_Grotesk, IBM_Plex_Sans } from "next/font/google";
 import type { ReactNode } from "react";
 
 import { useConnection } from "@/components/connection-provider";
-
-const displayFont = Space_Grotesk({ subsets: ["latin"], variable: "--font-display" });
-const bodyFont = IBM_Plex_Sans({ subsets: ["latin"], weight: ["400", "500", "600"], variable: "--font-body" });
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard" },
@@ -31,7 +27,7 @@ export function AppFrame({ children }: { children: ReactNode }) {
   }
 
   return (
-    <div className={`${displayFont.variable} ${bodyFont.variable} min-h-screen font-[family-name:var(--font-body)] text-slate-900`}>
+    <div className="min-h-screen font-[family-name:var(--font-body)] text-slate-900">
       <div className="data-grid min-h-screen">
         <div className="mx-auto flex min-h-screen max-w-7xl gap-6 px-4 py-5 sm:px-6 lg:px-8">
           <aside className="glass-panel hidden w-72 shrink-0 rounded-[28px] p-5 lg:flex lg:flex-col">

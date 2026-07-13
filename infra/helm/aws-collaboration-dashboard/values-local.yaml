@@ -1,0 +1,25 @@
+fullnameOverride: aws-dashboard
+
+image:
+  api:
+    repository: aws-dashboard-api
+    tag: local
+    pullPolicy: Never
+  web:
+    repository: aws-dashboard-web
+    tag: local
+    pullPolicy: Never
+
+postgres:
+  database: aws_dashboard
+  username: dashboard
+  password: dashboard
+  storageSize: 5Gi
+
+api:
+  corsOrigins: http://dashboard.localhost:8080
+
+ingress:
+  enabled: true
+  className: traefik
+  host: dashboard.localhost

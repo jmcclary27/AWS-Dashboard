@@ -14,6 +14,8 @@
   --warm: #f97316;
   --warm-soft: rgba(249, 115, 22, 0.15);
   --success: #0f766e;
+  --font-display: "Avenir Next", "Segoe UI", sans-serif;
+  --font-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
 }
 
 * {
@@ -32,6 +34,13 @@ body {
     radial-gradient(circle at top left, rgba(14, 165, 233, 0.18), transparent 35%),
     radial-gradient(circle at top right, rgba(249, 115, 22, 0.14), transparent 28%),
     linear-gradient(180deg, #fcfdff 0%, var(--bg) 55%, #eef3f9 100%);
+}
+
+.page-loading {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  color: var(--muted);
 }
 
 a {
@@ -65,4 +74,3 @@ select {
     linear-gradient(90deg, rgba(148, 163, 184, 0.08) 1px, transparent 1px);
   background-size: 32px 32px;
 }
-

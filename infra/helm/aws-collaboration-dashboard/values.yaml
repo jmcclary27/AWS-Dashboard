@@ -1,18 +1,98 @@
+nameOverride: ""
+fullnameOverride: ""
+
 image:
   web:
-    repository: ghcr.io/example/aws-collaboration-dashboard-web
-    tag: latest
+    repository: aws-dashboard-web
+    tag: local
+    pullPolicy: Never
   api:
-    repository: ghcr.io/example/aws-collaboration-dashboard-api
-    tag: latest
+    repository: aws-dashboard-api
+    tag: local
+    pullPolicy: Never
+
+postgres:
+  image:
+    repository: postgres
+    tag: "16-alpine"
+    pullPolicy: IfNotPresent
+  database: aws_dashboard
+  username: dashboard
+  # For local use only. Supply a different value through a private values file
+  # before deploying anywhere shared.
+  password: dashboard
+  storageSize: 5Gi
+  storageClass: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+api:
+  replicaCount: 1
+  service:
+    type: ClusterIP
+    port: 8000
+  corsOrigins: http://localhost:3000
+  seedDays: 90
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    runAsGroup: 10001
+    fsGroup: 10001
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+    readOnlyRootFilesystem: false
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+web:
+  replicaCount: 1
+  service:
+    type: ClusterIP
+    port: 3000
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    runAsGroup: 10001
+    fsGroup: 10001
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+    readOnlyRootFilesystem: false
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+
+bootstrap:
+  backoffLimit: 3
+  activeDeadlineSeconds: 300
+  ttlSecondsAfterFinished: 300
 
 ingress:
   enabled: false
+  className: traefik
+  annotations: {}
   host: aws-dashboard.local
 
-postgres:
-  storageSize: 5Gi
-
-collector:
-  schedule: "0 6 * * *"
-
+# Name of a pre-existing Secret containing short-lived standard AWS credential
+# variables. It is injected only into the API pod when non-empty.
+aws:
+  existingSecret: ""

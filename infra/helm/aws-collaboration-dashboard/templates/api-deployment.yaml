@@ -1,0 +1,81 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "aws-collaboration-dashboard.apiServiceName" . }}
+  labels:
+    {{- include "aws-collaboration-dashboard.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  replicas: {{ .Values.api.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "aws-collaboration-dashboard.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: api
+  template:
+    metadata:
+      labels:
+        {{- include "aws-collaboration-dashboard.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: api
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml .Values.api.podSecurityContext | nindent 8 }}
+      containers:
+        - name: api
+          image: {{ printf "%s:%s" .Values.image.api.repository .Values.image.api.tag | quote }}
+          imagePullPolicy: {{ .Values.image.api.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.api.containerSecurityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.api.service.port }}
+              protocol: TCP
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "aws-collaboration-dashboard.databaseSecretName" . }}
+                  key: DATABASE_URL
+            - name: API_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "aws-collaboration-dashboard.configMapName" . }}
+                  key: API_HOST
+            - name: API_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "aws-collaboration-dashboard.configMapName" . }}
+                  key: API_PORT
+            - name: CORS_ORIGINS
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "aws-collaboration-dashboard.configMapName" . }}
+                  key: CORS_ORIGINS
+            - name: SEED_DAYS
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "aws-collaboration-dashboard.configMapName" . }}
+                  key: SEED_DAYS
+          {{- with .Values.aws.existingSecret }}
+          envFrom:
+            - secretRef:
+                name: {{ . | quote }}
+          {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 6
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 12
+          resources:
+            {{- toYaml .Values.api.resources | nindent 12 }}

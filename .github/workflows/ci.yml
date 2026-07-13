@@ -34,8 +34,42 @@ jobs:
         with:
           version: 9.15.0
       - name: Install workspace dependencies
-        run: pnpm install --no-frozen-lockfile
+        run: pnpm install --frozen-lockfile
       - name: Typecheck web
         run: pnpm --filter web typecheck
       - name: Build web
+        env:
+          NEXT_PUBLIC_API_BASE_URL: /api/v1
         run: pnpm --filter web build
+
+  container-builds:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build API image
+        run: docker build -t aws-dashboard-api:ci -f apps/api/Dockerfile .
+      - name: Build production web image
+        run: docker build --build-arg NEXT_PUBLIC_API_BASE_URL=/api/v1 -t aws-dashboard-web:ci -f apps/web/Dockerfile .
+
+  helm-validation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.3
+      - name: Install kubeconform
+        run: |
+          set -o pipefail
+          curl --fail --location --silent --show-error https://github.com/yannh/kubeconform/releases/download/v0.8.0/kubeconform-linux-amd64.tar.gz | tar -xz -C /tmp
+          sudo install /tmp/kubeconform /usr/local/bin/kubeconform
+      - name: Lint chart
+        run: helm lint infra/helm/aws-collaboration-dashboard
+      - name: Render and validate default values
+        run: |
+          helm template aws-dashboard infra/helm/aws-collaboration-dashboard > /tmp/chart-default.yaml
+          kubeconform -strict -summary -kubernetes-version 1.32.0 /tmp/chart-default.yaml
+      - name: Render and validate local ingress values
+        run: |
+          helm template aws-dashboard infra/helm/aws-collaboration-dashboard --values infra/helm/aws-collaboration-dashboard/values-local.yaml --set aws.existingSecret=aws-runtime > /tmp/chart-local.yaml
+          kubeconform -strict -summary -kubernetes-version 1.32.0 /tmp/chart-local.yaml

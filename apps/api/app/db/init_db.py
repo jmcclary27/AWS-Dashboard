@@ -3,6 +3,7 @@ from datetime import date
 
 from alembic import command
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, inspect, select
 
 from app.config import get_settings
@@ -13,7 +14,17 @@ from app.services.billing import build_demo_billing_truth
 
 
 BASELINE_REVISION = "0001_baseline"
-HEAD_REVISION = "0003_payable_billing_truth"
+
+
+def get_alembic_head_revision(database_url: str | None = None) -> str | None:
+    """Return the current Alembic head from the migration scripts.
+
+    Deriving this from the script directory keeps migration checks correct when
+    a new revision is added, rather than coupling runtime behavior to a
+    hard-coded revision identifier.
+    """
+    config = build_alembic_config(database_url or get_settings().database_url)
+    return ScriptDirectory.from_config(config).get_current_head()
 
 
 def legacy_schema_revision(database_url: str) -> str | None:
@@ -27,7 +38,7 @@ def legacy_schema_revision(database_url: str) -> str | None:
     if "alembic_version" in table_names:
         return None
     if "connections" in table_names and "connection_accounts" in table_names:
-        return HEAD_REVISION
+        return get_alembic_head_revision(database_url)
     if "accounts" in table_names:
         return BASELINE_REVISION
     return None

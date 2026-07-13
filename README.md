@@ -6,7 +6,7 @@ A monorepo portfolio project for cost visibility across multiple AWS accounts, s
 
 - `apps/web`: Next.js App Router frontend with Tailwind, Recharts, and connection-scoped views.
 - `apps/api`: FastAPI service with SQLAlchemy models, Alembic migrations, demo seeding, and AWS-ready collector routes.
-- `infra`: placeholders for Helm and OpenTofu assets.
+- `infra`: a local k3d Helm chart plus staged OpenTofu assets.
 - `docs`: architecture and setup notes for the current connection-scoped MVP.
 
 ## Current scope
@@ -26,6 +26,12 @@ This repository now implements a connection-scoped MVP slice from the attached p
 2. Run `docker compose up --build`.
 3. Open `http://localhost:3000` for the web app.
 4. Open `http://localhost:8000/docs` for the FastAPI docs.
+
+## Local Kubernetes (k3d)
+
+The Helm chart runs the same web, API, and PostgreSQL stack in a local k3d cluster. It creates a persistent PostgreSQL volume and a one-shot bootstrap Job that applies migrations and seeds the demo dataset before the API becomes ready.
+
+Install Docker Desktop, `kubectl`, Helm, and k3d first. Then follow [the local Kubernetes guide](docs/kubernetes-local.md) to build/import images, install the chart, optionally provide short-lived AWS credentials, and validate the deployment at `http://dashboard.localhost:8080` (with `http://localhost:8080` as a Windows DNS fallback).
 
 ## Real AWS syncs
 
@@ -77,4 +83,4 @@ The app does not store AWS access keys in the database or browser state. AWS-bac
 - The current local default is still demo-first, but the API and schema now support AWS-backed collector implementations.
 - Dashboard headline pricing is now payable-first: exact when AWS Data Exports are reachable and fresh, approximate when the app falls back to Cost Explorer net values.
 - The safest local AWS path is a read-only `~/.aws` mount or short-lived environment credentials passed only to the `api` container.
-- Helm templates and OpenTofu rollout assets remain staged for later infrastructure work.
+- The local Helm chart is ready for k3d; OpenTofu rollout assets, public delivery, monitoring, and scheduled collection remain later infrastructure work.

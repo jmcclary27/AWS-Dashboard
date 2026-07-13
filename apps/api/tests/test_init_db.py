@@ -4,7 +4,7 @@ from alembic import command
 from sqlalchemy import create_engine, inspect, text
 
 from app.config import get_settings
-from app.db.init_db import build_alembic_config, run_migrations
+from app.db.init_db import build_alembic_config, get_alembic_head_revision, run_migrations
 
 
 def test_run_migrations_upgrades_legacy_schema_without_alembic_version(monkeypatch, tmp_path: Path) -> None:
@@ -34,7 +34,7 @@ def test_run_migrations_upgrades_legacy_schema_without_alembic_version(monkeypat
 
         with engine.connect() as connection:
             revision = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-            assert revision == "0003_payable_billing_truth"
+            assert revision == get_alembic_head_revision(database_url)
     finally:
         engine.dispose()
         get_settings.cache_clear()

@@ -16,3 +16,7 @@ The browser talks only to FastAPI. The web app never connects to Postgres direct
 2. FastAPI reads and writes Postgres through SQLAlchemy 2 models and Alembic-managed schema changes.
 3. A built-in demo connection refreshes a rolling 14-day window for local development.
 4. Org-management and standalone account-role collectors write through the same scoped tables so datasets stay isolated.
+
+## Local Kubernetes shape
+
+The k3d Helm release keeps the browser-to-FastAPI boundary intact. Traefik sends `/api` to the API service and all other requests to the web service. PostgreSQL is a single persisted StatefulSet. A revision-named bootstrap Job waits for PostgreSQL, applies Alembic migrations, and seeds the demo data; API readiness stays false until the database is at the migration head.
